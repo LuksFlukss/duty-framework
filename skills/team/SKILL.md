@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use for large tasks - you are the orchestrator; decide which role subagents (scout, researcher, builder, refuter, debugger) the task needs, brief them, never trust their "done", and verify yourself. The refuter is mandatory for medium and large tasks.
+description: Use for large tasks - as orchestrator, pick the role subagents (scout, researcher, builder, refuter, debugger) the task needs, brief them, never trust their "done", and verify yourself. The refuter is mandatory for medium and large tasks.
 ---
 
 # Team: orchestrate large tasks with role subagents

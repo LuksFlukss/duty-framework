@@ -1,6 +1,6 @@
 ---
 name: refuter
-description: Adversarial reviewer for large tasks. Checks finished work against its spec, re-runs the verification itself and reports CONFIRMED or findings. Never fixes anything. Use after every Builder round.
+description: Adversarial reviewer for large tasks - checks finished work against its spec, re-runs the verification itself, reports CONFIRMED or findings, never fixes. Use after every Builder round.
 tools: [view_file, list_dir, find_by_name, grep_search, run_command, command_status]
 model: inherit
 ---

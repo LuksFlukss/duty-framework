@@ -1,61 +1,50 @@
 # How to work with me
 
 ## Git: local changes only
-- Never run `git commit`, `git merge`, `git push`, `git stash`, `git reset`, `git checkout -- <file>`, or create branches/PRs.
-- Read-only git is fine: `git status`, `git diff`, `git log`, `git blame`.
-- Leave all changes uncommitted. I review everything and write my own commit messages.
+- Never run `git commit`, `merge`, `push`, `stash`, `reset`, `checkout -- <file>`, or create branches/PRs. Read-only git (`status`, `diff`, `log`, `blame`) is fine.
+- Leave all changes uncommitted; I review and write my own commit messages.
 
 ## Real environments: read-only
-- Never apply, deploy, publish or otherwise change anything outside the working copy without my explicit permission. That covers any tool: infrastructure (`terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`), cloud CLIs, database migrations or writes, package publishes, releases.
-- Read-only and dry-run commands are fine: `plan`, `validate`, `lint`, `diff`, `--dry-run`, `get`/`describe`, `template`.
-- Not sure whether a command changes something real? Treat it as an apply and ask.
+- Never apply, deploy, publish or otherwise change anything outside the working copy without my explicit permission, with any tool: infrastructure (`terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`), cloud CLIs, database migrations or writes, package publishes, releases.
+- Read-only and dry-run commands are fine: `plan`, `validate`, `lint`, `diff`, `--dry-run`, `get`/`describe`, `template`. Unsure whether a command changes something real? Treat it as an apply and ask.
 
 ## Subagents
-- Hand work to subagents when it helps: independent steps that can run in parallel, broad searches across many files, a fresh-eyes review. Do small or tightly coupled work yourself.
-- When you start a subagent, put these rules and the task's limits in its instructions: it doesn't see this conversation. At minimum: no git writes, no apply/deploy, verify before claiming done, and report questions back instead of guessing. Also say exactly what to return.
-- You own the result: check a subagent's work yourself (read the changes, re-run the checks) before building on it or claiming done. My gates (OK, "go") stay the same.
+- Hand work to subagents when it helps (parallel independent steps, broad searches across many files, a fresh-eyes review); do small or tightly coupled work yourself.
+- When you start a subagent, its instructions must hold these rules and the task's limits (it doesn't see this conversation): at minimum no git writes, no apply/deploy, verify before claiming done, report questions back instead of guessing, and exactly what to return.
+- You own the result: check its work yourself (read the changes, re-run the checks) before building on it or claiming done. My gates (OK, "go") stay the same.
 
 ## Match the process to the task
-- Start your reply to each new task with `Size: small|medium|large|quick` (quick = I said "quick") so I can correct it.
+- Start your reply to each new task with `Size: small|medium|large|quick` so I can correct it.
 - **Small** (typo, rename, one-line fix, a question): just do it.
-- **Medium** (a bug, a small feature): short plan in chat, then do it; before handoff a refuter subagent reviews the result (see `team`, steps 4–5).
-- **Large** (new feature, refactor, anything touching many files): follow all steps below, as orchestrator: load the `team` skill and run it. The refuter is never skipped.
-- If I say "quick", skip the ceremony.
+- **Medium** (a bug, a small feature): short plan in chat, do it, then a refuter subagent reviews it before handoff (`team`, steps 4–5).
+- **Large** (new feature, refactor, many files): all steps below, as orchestrator: load the `team` skill and run it. The refuter is never skipped.
+- **Quick** (I said "quick"): skip the ceremony.
 
 ## 1. Understand before building
-- Before proposing a design, look at the repo's current architecture (stack, structure, conventions) so the design fits it. If you're still unsure about the design after that, ask me.
-- Before writing code for anything non-trivial, ask what I'm actually trying to achieve. One question at a time.
+- Before proposing a design, look at the repo's architecture (stack, structure, conventions) so the design fits it; still unsure about the design after that? Ask me.
+- Before writing code for anything non-trivial, ask what I'm actually trying to achieve, one question at a time.
+- Anything ambiguous? Ask; don't guess and build.
 - Propose a short design (what changes, which files, trade-offs). Wait for my OK before implementing.
-- If something is ambiguous, ask. Don't guess and build.
 
 ## 2. Plan
-- Break the work into small steps, each with: files touched, what changes, how to verify it.
-- Show me the plan. Wait for "go".
+- Small steps, each with files touched, what changes, how to verify it. Show me the plan; wait for "go".
 - Stick to the plan. If it turns out wrong, stop and tell me instead of silently changing course.
 
 ## 3. Test first
-- Write a failing test before the implementation. Run it and confirm it fails for the right reason.
-- Write the minimum code to make it pass. Run it again.
-- Refactor only with tests green.
-- If the project has no test setup, say so and ask how I want to verify.
+- Write a failing test, run it, confirm it fails for the right reason. Then the minimum code to pass; run it again. Refactor only with tests green.
+- No test setup? Say so and ask how I want to verify.
 
 ## 4. Debug systematically
-- Don't guess at fixes. Reproduce the problem first.
-- Find the root cause (read the error, trace the data, check recent changes) before changing code.
+- Reproduce first, then find the root cause (read the error, trace the data, check recent changes) before changing code. No guessed fixes.
 - One hypothesis at a time. If two fixes fail, stop and explain what you've learned.
 
 ## 5. Best solution, not overcomplicated
-- Build only what was asked. No speculative features, no "while I'm here" changes.
-- Pick the best solution for the circumstances (the problem, the repo, the scale), not the most basic one. For new work that means the current standard tech for the job, whether frontend, backend, data, infra or tooling. In an existing repo, reuse its code, patterns and stack.
-- Implement it without overcomplicating: no extra libraries, layers, abstractions or config until needed.
-- Don't touch unrelated files. Don't reformat code you didn't change.
+- Build only what was asked: no speculative features, no "while I'm here" changes.
+- Pick the best solution for the circumstances (problem, repo, scale), not the most basic one: for new work the current standard tech for the job (frontend, backend, data, infra or tooling); in an existing repo, reuse its code, patterns and stack.
+- No extra libraries, layers, abstractions or config until needed. Don't touch unrelated files or reformat code you didn't change.
 
 ## 6. Verify before claiming done
-- Never say "fixed", "done", or "working" without running the tests or commands that prove it, and showing the result.
-- If you couldn't verify something, say so plainly.
+- Never say "fixed", "done" or "working" without running the tests or commands that prove it and showing the result. Couldn't verify? Say so plainly.
 
 ## 7. Hand off for review
-When finished, give me:
-- A list of changed files with one line on what changed in each
-- What you tested and the results
-- Anything you're unsure about or left out
+When finished, give me: changed files (one line each on what changed), what you tested and the results, and anything you're unsure about or left out.

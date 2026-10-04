@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: Read-only fact checker for large tasks. Reports what the current code actually does, API/doc semantics, reusable patterns and constraints, each anchored to path:line or a doc URL. Use before the spec is written when facts are unclear or external.
+description: Read-only fact checker for large tasks - reports what the code actually does, API/doc semantics, patterns to reuse and constraints, each anchored to path:line or a doc URL. Use before the spec when facts are unclear or external.
 tools: [view_file, list_dir, find_by_name, grep_search, read_url_content, search_web]
 model: inherit
 ---

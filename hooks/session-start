@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Injects RULES.md and the skill list at session start.
+# Injects RULES.md at session start, plus the skill list where the CLI doesn't list plugin skills itself.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/hooks/emit.sh"
 
 skills=""
-for f in "$ROOT"/skills/*/SKILL.md; do
-  [ -f "$f" ] || continue
-  name=$(sed -n 's/^name: *//p' "$f" | head -1)
-  desc=$(sed -n 's/^description: *//p' "$f" | head -1)
-  skills+="- ${name}: ${desc}"$'\n'
-done
+# Claude Code already lists every plugin skill with its description; elsewhere list them here.
+if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ] || [ -n "${COPILOT_CLI:-}" ]; then
+  skills=$'\n## Skills (duty-framework)\nLoad the matching skill when a step applies:\n'
+  for f in "$ROOT"/skills/*/SKILL.md; do
+    [ -f "$f" ] || continue
+    name=$(sed -n 's/^name: *//p' "$f" | head -1)
+    desc=$(sed -n 's/^description: *//p' "$f" | head -1)
+    skills+="- ${name}: ${desc}"$'\n'
+  done
+fi
 
 emit SessionStart "<IMPORTANT>
 These are the user's working rules. Follow them on every request, for the whole session.
 
 $(cat "$ROOT/RULES.md")
-
-## Skills (duty-framework)
-Load the matching skill when a step applies:
 ${skills}</IMPORTANT>"

@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Implements one spec from the orchestrator - test first, minimum change, runs the verification and reports its actual output. Use for the implementation steps of a large task.
+description: Implements one spec test-first with the minimum change, runs the verification and reports its actual output. Use for the implementation steps of a large task.
 tools: read, edit, search, execute
 ---
 

@@ -60,9 +60,15 @@ else
   echo "FAIL rules tell main agent to pass rules to subagents"; fails=$((fails + 1))
 fi
 
+# Claude Code lists plugin skills itself, so session-start only lists them elsewhere
 run session-start CLAUDE_PLUGIN_ROOT="$ROOT"
-for skill in design plan tdd debugging verify-and-handoff team agents; do
-  check "session-start lists skill $skill" ".hookSpecificOutput.additionalContext | contains(\"- $skill:\")"
+check "session-start claude: rules but no duplicate skill list" \
+  '.hookSpecificOutput.additionalContext | contains("Never run `git commit`") and (contains("Skills (duty-framework)") | not)'
+for cli in copilot unknown; do
+  if [ $cli = copilot ]; then run session-start CLAUDE_PLUGIN_ROOT="$ROOT" COPILOT_CLI=1; else run session-start; fi
+  for skill in design plan tdd debugging verify-and-handoff team agents; do
+    check "session-start $cli lists skill $skill" ".additionalContext | contains(\"- $skill:\")"
+  done
 done
 
 ok_or_fail() { # name, condition exit status
