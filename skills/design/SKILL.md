@@ -14,11 +14,11 @@ Goal: you and the user agree on what to build before any code is written.
    - Medium: a few sentences of plan in chat, then do it.
    - Large: continue below.
    - "quick" from the user: skip the ceremony.
-2. **Read first.** Look at the relevant code, docs and recent changes (read-only) so your questions are informed.
+2. **Read the current architecture first.** Search the repo (read-only) for its stack, structure and conventions, plus the relevant code, docs and recent changes, so the design builds on what's there and your questions are informed. Still unsure about the design after that? Ask in step 3.
 3. **Ask what they're trying to achieve.** One question per message. Prefer multiple choice. Stop asking once you can describe the outcome and how you'd know it works.
 4. **Propose a short design:**
    - what changes and why
-   - which files
+   - which tech (best fit for the circumstances) and which files
    - trade-offs, and the alternative you rejected
    - how it will be verified
 5. **Wait for OK.** No implementation, scaffolding or installs before it. Then use the `plan` skill.
@@ -27,4 +27,5 @@ Goal: you and the user agree on what to build before any code is written.
 
 - Ambiguous? Ask. Don't guess and build.
 - Build only what was asked. Reuse what the repo already has.
+- Propose the best solution for the circumstances, not the most basic one or dated tech. Then keep the design small; don't overcomplicate it.
 - No design docs or spec files unless the user asks for one; the design lives in chat.

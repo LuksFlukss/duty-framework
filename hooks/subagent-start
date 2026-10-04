@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Injects RULES.md into every subagent (Claude Code), which doesn't get the session-start context.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/hooks/emit.sh"
+
+emit SubagentStart "<IMPORTANT>
+You are a subagent. These are the user's working rules; follow them for this task.
+You can't talk to the user: where the rules say to ask the user or wait for their OK, stop and report the question back instead.
+
+$(cat "$ROOT/RULES.md")
+</IMPORTANT>"

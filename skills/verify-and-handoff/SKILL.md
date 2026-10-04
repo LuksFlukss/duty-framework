@@ -9,7 +9,7 @@ description: Use before saying done, fixed, working or passing - run the command
 
 Before any claim of "done", "fixed", "working" or "passing":
 
-1. Decide which command proves the claim (tests, build, lint, running the thing).
+1. Decide which command proves the claim (tests, build, lint, running the thing). For infrastructure and other real environments, prove it with read-only checks (`plan`, `validate`, `--dry-run`); never apply or deploy to verify.
 2. Run it fresh, now. Not an earlier run, not a subagent's report.
 3. Read the full output: exit code, failure count.
 4. Claim only what the output shows, and show it.

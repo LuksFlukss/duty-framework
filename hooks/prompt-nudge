@@ -3,4 +3,4 @@
 set -euo pipefail
 . "$(dirname "$0")/emit.sh"
 
-emit UserPromptSubmit "Rules reminder: classify this request as small / medium / large (\"quick\" = skip ceremony) and follow the matching process. No git writes; leave all changes uncommitted. Never claim done/fixed/working without showing the verifying output."
+emit UserPromptSubmit "Rules reminder: classify this request as small / medium / large (\"quick\" = skip ceremony) and follow the matching process. No git writes; leave all changes uncommitted. No apply/deploy to real environments without permission; plan/validate/dry-run only. Never claim done/fixed/working without showing the verifying output."
