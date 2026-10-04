@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Injects RULES.md and the skill list at session start.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/hooks/emit.sh"
+
+skills=""
+for f in "$ROOT"/skills/*/SKILL.md; do
+  [ -f "$f" ] || continue
+  name=$(sed -n 's/^name: *//p' "$f" | head -1)
+  desc=$(sed -n 's/^description: *//p' "$f" | head -1)
+  skills+="- ${name}: ${desc}"$'\n'
+done
+
+emit SessionStart "<IMPORTANT>
+These are the user's working rules. Follow them on every request, for the whole session.
+
+$(cat "$ROOT/RULES.md")
+
+## Skills (ai-duty-framework)
+Load the matching skill when a step applies:
+${skills}</IMPORTANT>"
