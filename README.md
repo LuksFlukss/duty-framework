@@ -1,4 +1,4 @@
-# ai-duty-framework
+# duty-framework
 
 My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code, GitHub Copilot CLI and Gemini CLI, plus five small skills. A lean take on [superpowers](https://github.com/obra/superpowers): no worktrees, no branches, no commits — all changes stay local for review.
 
@@ -13,24 +13,24 @@ Gemini CLI has no hooks; it gets the same rules and skills through `GEMINI.md`, 
 Claude Code:
 
 ```bash
-claude plugin marketplace add ~/ai-duty-framework
-claude plugin install ai-duty-framework@ai-duty-framework
-# or per session: claude --plugin-dir ~/ai-duty-framework
+claude plugin marketplace add ~/duty-framework
+claude plugin install duty-framework@duty-framework
+# or per session: claude --plugin-dir ~/duty-framework
 ```
 
 GitHub Copilot CLI:
 
 ```bash
-copilot plugin marketplace add ~/ai-duty-framework
-copilot plugin install ai-duty-framework@ai-duty-framework
-# or per session: copilot --plugin-dir ~/ai-duty-framework
+copilot plugin marketplace add ~/duty-framework
+copilot plugin install duty-framework@duty-framework
+# or per session: copilot --plugin-dir ~/duty-framework
 ```
 
 Gemini CLI:
 
 ```bash
-ln -s ~/ai-duty-framework ~/.gemini/extensions/ai-duty-framework
-gemini -l   # should list ai-duty-framework
+ln -s ~/duty-framework ~/.gemini/extensions/duty-framework
+gemini -l   # should list duty-framework
 ```
 
 ## Test

@@ -17,6 +17,6 @@ These are the user's working rules. Follow them on every request, for the whole 
 
 $(cat "$ROOT/RULES.md")
 
-## Skills (ai-duty-framework)
+## Skills (duty-framework)
 Load the matching skill when a step applies:
 ${skills}</IMPORTANT>"

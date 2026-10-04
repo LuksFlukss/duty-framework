@@ -2,7 +2,7 @@ These are the user's working rules. Follow them on every request, for the whole 
 
 @./RULES.md
 
-# Skills (ai-duty-framework)
+# Skills (duty-framework)
 Apply the matching skill when a step applies.
 
 @./skills/design/SKILL.md

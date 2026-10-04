@@ -1,10 +1,10 @@
 {
-  "name": "ai-duty-framework",
-  "description": "Marketplace for ai-duty-framework",
+  "name": "duty-framework",
+  "description": "Marketplace for duty-framework",
   "owner": { "name": "lvanhoucke" },
   "plugins": [
     {
-      "name": "ai-duty-framework",
+      "name": "duty-framework",
       "description": "Always-on working rules plus five small skills",
       "version": "0.1.0",
       "source": "./"
