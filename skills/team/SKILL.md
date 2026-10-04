@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use for large tasks - you are the orchestrator; decide which role subagents (scout, researcher, builder, refuter, debugger) the task needs, brief them, never trust their "done", and verify yourself.
+description: Use for large tasks - you are the orchestrator; decide which role subagents (scout, researcher, builder, refuter, debugger) the task needs, brief them, never trust their "done", and verify yourself. The refuter is mandatory for medium and large tasks.
 ---
 
 # Team: orchestrate large tasks with role subagents
@@ -10,7 +10,8 @@ roles to run, brief them, judge their reports and verify the result yourself.
 The user's gates stay the same: OK on the design, "go" on the plan, their
 review at the end.
 
-Small or medium task? Don't use this skill; do the work yourself.
+Small task? Don't use this skill. Medium task: do the work yourself, but run
+steps 4–5 (refute, send back) before handoff.
 
 ## Roles
 
@@ -39,7 +40,7 @@ before starting them:
 - **builder**: one per independent part of the plan; parallel only if they
   touch no shared files. Tightly coupled work goes to one builder, or do it
   yourself.
-- **refuter**: **never skipped** for a large task.
+- **refuter**: **never skipped for medium or large** tasks.
 - **debugger**: not by default; only per "Send back" below.
 
 ## Process

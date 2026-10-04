@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: blocks handoff of a medium/large task with edits but no refuter review (large: and no team skill).
+set -uo pipefail
+
+command -v jq >/dev/null || exit 0
+input=$(cat)
+path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
+[ -n "$path" ] && [ -r "$path" ] || exit 0
+
+# last_assistant_message is ignored: a label there would come after the turn's edits.
+jq -ncR '
+  def agent($suffix): .type == "tool_use" and (.name == "Agent" or .name == "Task")
+    and ((.input.subagent_type // "") | endswith($suffix));
+  def edit: (.type == "tool_use" and (.name == "Write" or .name == "Edit" or .name == "NotebookEdit")
+    and ((.input.file_path // .input.notebook_path // "") | contains("/.claude/") | not)) or agent("builder");
+  # a user prompt starts a turn; tool results and meta entries (skill bodies, hand-backs) do not
+  def boundary: .type == "user" and (.isMeta != true) and (.message.content
+    | (type == "string") or (type == "array" and any(.[]; .type? == "text") and (any(.[]; .type? == "tool_result") | not)));
+  def sizelabel: capture("\\A[\\s#>*_`]*Size:[\\s*_`]*(?<s>small|medium|large|quick)\\b(?![\\s*_`]*[|/,])"; "i").s | ascii_downcase;
+
+  # one JSON entry per line; malformed lines are skipped
+  [ inputs | fromjson? | objects ]
+  # ordered events: turn boundaries, assistant text and tool_use blocks
+  | [ .[] | if boundary then {type: "boundary"}
+            elif .type == "assistant" then .message.content? | arrays | .[] | select(.type == "text" or .type == "tool_use")
+            else empty end ]
+  | . as $ev
+  # last label that comes before the first edit of its turn
+  | (reduce range(length) as $i ({edited: false, size: null}; $ev[$i] as $e
+      | if $e.type == "boundary" then .edited = false
+        elif ($e | edit) then .edited = true
+        elif $e.type == "text" and (.edited | not) and ([$e.text | sizelabel] | length > 0) then .size = {i: $i, s: ($e.text | sizelabel)}
+        else . end) | .size) as $size
+  | select($size != null and ($size.s == "medium" or $size.s == "large"))
+  | [ $ev[$size.i + 1:] | to_entries[] | .key += $size.i + 1 ] as $after
+  | ([ $after[] | select(.value | edit) | .key ] | last) as $lastEdit
+  | select($lastEdit != null)
+  | ([ $ev[$lastEdit + 1:][] | select(agent("refuter")) ] | length > 0) as $refuted
+  | ([ $after[].value | select(.type == "tool_use" and .name == "Skill"
+       and (.input.skill == "team" or .input.skill == "duty-framework:team")) ] | length > 0) as $team
+  | select(($refuted | not) or ($size.s == "large" and ($team | not)))
+  | { decision: "block",
+      reason: ("duty-framework: Size: \($size.s) task with edits but "
+        + ([ (if $refuted then empty else "no refuter review after the last edit" end),
+             (if $size.s == "large" and ($team | not) then "the team skill wasn'"'"'t loaded" else empty end) ] | join(" and "))
+        + ". "
+        + (if $size.s == "large" and ($team | not) then "Load the team skill, run" else "Run" end)
+        + (if $refuted then " it" else " a refuter subagent on the final changes (send back findings, max 2 rounds)" end)
+        + ", then hand off.") }
+' "$path" 2>/dev/null || exit 0

@@ -16,9 +16,10 @@
 - You own the result: check a subagent's work yourself (read the changes, re-run the checks) before building on it or claiming done. My gates (OK, "go") stay the same.
 
 ## Match the process to the task
+- Start your reply to each new task with `Size: small|medium|large|quick` (quick = I said "quick") so I can correct it.
 - **Small** (typo, rename, one-line fix, a question): just do it.
-- **Medium** (a bug, a small feature): short plan in chat, then do it.
-- **Large** (new feature, refactor, anything touching many files): follow all steps below, as orchestrator of a role team (`team` skill) when that helps.
+- **Medium** (a bug, a small feature): short plan in chat, then do it; before handoff a refuter subagent reviews the result (see `team`, steps 4–5).
+- **Large** (new feature, refactor, anything touching many files): follow all steps below, as orchestrator: load the `team` skill and run it. The refuter is never skipped.
 - If I say "quick", skip the ceremony.
 
 ## 1. Understand before building

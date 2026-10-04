@@ -16,6 +16,7 @@ Small steps, each with:
 - Code steps go test-first (see `tdd`): failing test, then implementation.
 - Last step: verify everything and hand off (see `verify-and-handoff`).
 - No commit steps. Changes stay uncommitted.
+- Medium task: the last step before handoff is a refuter review (see `team`, steps 4–5).
 - Large task: run it as a team (see `team`). Mark which role does each step and which steps can be handed to subagents in parallel (no shared files).
 
 Show the plan in chat. **Wait for "go".**

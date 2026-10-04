@@ -9,9 +9,9 @@ Goal: you and the user agree on what to build before any code is written.
 
 ## Steps
 
-1. **Size it.** Say whether the request is small, medium or large, so the user can correct you.
+1. **Size it.** State it as `Size: small|medium|large|quick` at the start of your reply, so the user can correct you.
    - Small: skip this skill, just do it.
-   - Medium: a few sentences of plan in chat, then do it.
+   - Medium: a few sentences of plan in chat, then do it, then a refuter review before handoff.
    - Large: continue below.
    - "quick" from the user: skip the ceremony.
 2. **Read the current architecture first.** Search the repo (read-only) for its stack, structure and conventions, plus the relevant code, docs and recent changes, so the design builds on what's there and your questions are informed. Still unsure about the design after that? Ask in step 3.

@@ -18,6 +18,8 @@ Couldn't verify something? Say so plainly. "Should work" is not verification.
 
 ## Hand off
 
+Medium or large task: don't hand off until a refuter has reviewed the final changes (`CONFIRMED`, or its findings fixed and refuted again).
+
 Leave everything uncommitted. Then give the user:
 
 - **Changed files** — one line each on what changed

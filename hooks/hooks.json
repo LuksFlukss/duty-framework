@@ -11,6 +11,11 @@
         "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start\"" }]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate\"" }]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-nudge\"" }]

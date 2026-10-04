@@ -1,7 +1,7 @@
 {
   "name": "duty-framework",
   "description": "Always-on working rules (local changes only, size-matched process, test first, verify before done) plus five small skills",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "Louka Vanhoucke" },
   "license": "MIT",
   "agents": "./copilot-agents"
