@@ -66,7 +66,7 @@ check "session-start claude: rules but no duplicate skill list" \
   '.hookSpecificOutput.additionalContext | contains("Never run `git commit`") and (contains("Skills (duty-framework)") | not)'
 for cli in copilot unknown; do
   if [ $cli = copilot ]; then run session-start CLAUDE_PLUGIN_ROOT="$ROOT" COPILOT_CLI=1; else run session-start; fi
-  for skill in design plan tdd debugging verify-and-handoff team agents; do
+  for skill in design plan tdd debugging verify-and-handoff team agents explain; do
     check "session-start $cli lists skill $skill" ".additionalContext | contains(\"- $skill:\")"
   done
 done
@@ -122,11 +122,11 @@ rm -rf "$tmp"
 
 out=$(cat "$ROOT/.claude-plugin/plugin.json")
 check "claude manifest lists claude-agents" '[.agents[]] | sort == ["./claude-agents/builder.md","./claude-agents/debugger.md","./claude-agents/refuter.md","./claude-agents/researcher.md","./claude-agents/scout.md"]'
-check "claude manifest version 0.3.0" '.version == "0.3.0"'
+check "claude manifest version 0.4.0" '.version == "0.4.0"'
 out=$(cat "$ROOT/.claude-plugin/marketplace.json")
-check "marketplace version 0.3.0" '.plugins[0].version == "0.3.0"'
+check "marketplace version 0.4.0" '.plugins[0].version == "0.4.0"'
 out=$(cat "$ROOT/.plugin/plugin.json" 2>/dev/null)
-check "copilot manifest points at copilot-agents" '.name == "duty-framework" and .agents == "./copilot-agents" and .version == "0.3.0"'
+check "copilot manifest points at copilot-agents" '.name == "duty-framework" and .agents == "./copilot-agents" and .version == "0.4.0"'
 
 # team skill: no fixed models, knows about personal agents
 ! grep -qE '^\| `[a-z]+` \| (haiku|sonnet|opus) \|' "$ROOT/skills/team/SKILL.md"
@@ -220,6 +220,16 @@ has RULES.md 'Size: small|medium|large|quick' && has RULES.md 'never skipped' &&
 ok_or_fail "RULES.md asks for a Size: label and never skips the refuter" $?
 grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q refuter
 ok_or_fail "RULES.md medium tasks get a refuter review" $?
+grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q 'wait for my OK'
+ok_or_fail "RULES.md medium tasks wait for my OK" $?
+has RULES.md 'Answering a clarifying question is not an OK'
+ok_or_fail "RULES.md: a clarifying-question answer is not an OK" $?
+grep -E '^ *- Medium:' "$ROOT/skills/design/SKILL.md" | grep -q 'wait for OK' && has skills/design/SKILL.md 'not an OK'
+ok_or_fail "design skill: medium waits for OK; a question answer is not an OK" $?
+grep -q 'after the user.s OK' "$ROOT/skills/team/SKILL.md"
+ok_or_fail "team skill: medium work starts after the user's OK" $?
+run prompt-nudge CLAUDE_PLUGIN_ROOT="$ROOT"
+check "prompt-nudge: medium waits for OK" '.hookSpecificOutput.additionalContext | contains("Medium → short plan, wait for OK")'
 run prompt-nudge CLAUDE_PLUGIN_ROOT="$ROOT"
 check "prompt-nudge mentions refuter and team" '.hookSpecificOutput.additionalContext | contains("refuter") and contains("team")'
 field "$ROOT/skills/team/SKILL.md" description | grep -q refuter && body "$ROOT/skills/team/SKILL.md" | grep -qF 'never skipped for medium or large'
@@ -228,8 +238,27 @@ has skills/design/SKILL.md 'Size: small|medium|large|quick'
 ok_or_fail "design skill asks for a Size: label" $?
 has skills/plan/SKILL.md refuter && has skills/verify-and-handoff/SKILL.md refuter
 ok_or_fail "plan and verify-and-handoff mention the refuter" $?
+TMPDIR_EXPLAIN=$(mktemp -d)
+# explain skill: read-only walkthrough with size, diagrams, 3-5 suggestions, and an offer to save as Markdown
+field "$ROOT/skills/explain/SKILL.md" name | grep -qx explain && field "$ROOT/skills/explain/SKILL.md" description | grep -qi 'explain'
+ok_or_fail "explain skill has name and description" $?
+has skills/explain/SKILL.md 'read-only' && has skills/explain/SKILL.md 'diagram' \
+  && has skills/explain/SKILL.md '3–5' && has skills/explain/SKILL.md 'Markdown file'
+ok_or_fail "explain skill: read-only, diagrams, 3–5 suggestions, offers a Markdown file" $?
+has skills/explain/SKILL.md 'Size: small' && has skills/explain/SKILL.md 'Repo size:' && has skills/explain/SKILL.md 'report questions back'
+ok_or_fail "explain skill: task is Size: small, repo size labelled separately, subagent brief carries the rules" $?
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Size: small\nRepo size: large"}]}}' \
+  '{"type":"user","message":{"role":"user","content":"yes, write FLOW.md"}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"FLOW.md","content":"x"}}]}}' > "$TMPDIR_EXPLAIN/t.jsonl"
+out=$(printf '{"transcript_path":"%s"}' "$TMPDIR_EXPLAIN/t.jsonl" | CLAUDE_PLUGIN_ROOT="$ROOT" "$ROOT/hooks/stop-gate" 2>/dev/null)
+! printf '%s' "$out" | grep -q '"block"'
+ok_or_fail "stop-gate lets explain write FLOW.md after Size: small" $?
+rm -rf "$TMPDIR_EXPLAIN"
+grep -q '`explain`' "$ROOT/README.md"
+ok_or_fail "README lists the explain skill" $?
 run subagent-start CLAUDE_PLUGIN_ROOT="$ROOT"
 check "subagent-start tells subagents to skip the Size: label" '.hookSpecificOutput.additionalContext | ascii_downcase | contains("skip the `size:` label")'
+check "subagent-start: the orchestrator's brief counts as the user's OK" '.hookSpecificOutput.additionalContext | contains("The orchestrator\u0027s brief is the user\u0027s OK")'
 out=$(cat "$ROOT/hooks/hooks.json")
 check "hooks.json registers Stop without matcher" '(.hooks.Stop[0].hooks[0].command | contains("stop-gate")) and (.hooks.Stop[0] | has("matcher") | not)'
 
@@ -343,7 +372,7 @@ fi
 
 if command -v agy >/dev/null; then
   out=$(agy plugin validate "$ROOT" 2>&1)
-  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 7 processed' && printf '%s' "$out" | grep -q 'agents *: 5 processed'; then
+  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 8 processed' && printf '%s' "$out" | grep -q 'agents *: 5 processed'; then
     echo "ok   agy plugin validate"
   else
     echo "FAIL agy plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))

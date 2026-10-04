@@ -16,7 +16,7 @@
 ## Match the process to the task
 - Start your reply to each new task with `Size: small|medium|large|quick` so I can correct it.
 - **Small** (typo, rename, one-line fix, a question): just do it.
-- **Medium** (a bug, a small feature): short plan in chat, do it, then a refuter subagent reviews it before handoff (`team`, steps 4–5).
+- **Medium** (a bug, a small feature): short plan in chat, wait for my OK, then do it, then a refuter subagent reviews it before handoff (`team`, steps 4–5).
 - **Large** (new feature, refactor, many files): all steps below, as orchestrator: load the `team` skill and run it. The refuter is never skipped.
 - **Quick** (I said "quick"): skip the ceremony.
 
@@ -25,6 +25,7 @@
 - Before writing code for anything non-trivial, ask what I'm actually trying to achieve, one question at a time.
 - Anything ambiguous? Ask; don't guess and build.
 - Propose a short design (what changes, which files, trade-offs). Wait for my OK before implementing.
+- Answering a clarifying question is not an OK; ask for the OK explicitly.
 
 ## 2. Plan
 - Small steps, each with files touched, what changes, how to verify it. Show me the plan; wait for "go".

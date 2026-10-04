@@ -10,8 +10,8 @@ roles to run, brief them, judge their reports and verify the result yourself.
 The user's gates stay the same: OK on the design, "go" on the plan, their
 review at the end.
 
-Small task? Don't use this skill. Medium task: do the work yourself, but run
-steps 4–5 (refute, send back) before handoff.
+Small task? Don't use this skill. Medium task: after the user's OK,
+do the work yourself, but run steps 4–5 (refute, send back) before handoff.
 
 ## Roles
 

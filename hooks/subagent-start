@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 emit SubagentStart "<IMPORTANT>
 You are a subagent. These are the user's working rules; follow them for this task.
 You can't talk to the user: where the rules say to ask the user or wait for their OK, stop and report the question back instead.
+The orchestrator's brief is the user's OK for the work it describes: do that work; report back only questions it leaves open.
 Skip the \`Size:\` label and the team/refuter requirement; the orchestrator handles those.
 
 $(cat "$ROOT/RULES.md")

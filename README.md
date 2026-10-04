@@ -5,7 +5,7 @@ My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code
 - **Session start** injects `RULES.md` and the skill list (also after `/clear` and compaction).
 - **Subagents** (Claude Code) get `RULES.md` too, with a note to report questions back instead of asking the user.
 - **Every prompt** gets a one-line reminder: size the task, no git writes, verify before "done".
-- **Skills:** `design`, `plan`, `tdd`, `debugging`, `verify-and-handoff`, `team` (orchestrate the role agents on large tasks), `agents` (personalise their model and effort).
+- **Skills:** `design`, `plan`, `tdd`, `debugging`, `verify-and-handoff`, `team` (orchestrate the role agents on large tasks), `agents` (personalise their model and effort), `explain` (walk through a repo's flow).
 - **Role agents** on all three CLIs: `scout`, `researcher`, `builder`, `refuter`, `debugger`.
 
 Antigravity CLI doesn't use the hooks; it gets the same rules through an `always_on` rule (`rules/duty-framework.md`, which includes `RULES.md`) that is sent with every request, and loads the same skills.
@@ -96,6 +96,16 @@ How each CLI gets your choice:
 - **Claude Code, Antigravity:** no per-agent override exists, so a personal copy `duty-<role>` is written to `~/.claude/agents/` or `~/.gemini/config/agents/`. The `team` skill uses it when present. Antigravity agents take only a tier (`flash_lite`, `flash`, `pro`) and no effort.
 
 Personal copies hold the role instructions from when they were written; run `scripts/personalize apply` after updating the plugin.
+
+## Explain the flow
+
+Ask "explain the flow" (or "explain this repo", "how does X work") for the `explain` skill. Read-only, it:
+
+1. labels the task `Size: small` (it's a question) and sizes the repo separately (`Repo size: small|medium|large`) to decide how deep to go; large repos are mapped first with `scout` and `researcher`
+2. walks through what the code does and why, step by step in the order it runs, with `path:line` references
+3. draws plain-text diagrams in the terminal (architecture, flow, data) where they help
+4. ends with 3–5 suggestions and questions, only ones that really apply
+5. asks whether to save the explanation as a Markdown file (e.g. `FLOW.md`), and writes it only on a yes
 
 ## Develop
 

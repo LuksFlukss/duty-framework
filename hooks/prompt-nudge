@@ -3,4 +3,4 @@
 set -euo pipefail
 . "$(dirname "$0")/emit.sh"
 
-emit UserPromptSubmit "Rules reminder: start a new task with \`Size: small|medium|large|quick\` (\"quick\" = skip ceremony) and follow the matching process. Medium → refuter review before handoff; large → load the \`team\` skill, refuter never skipped. No git writes; leave changes uncommitted. No apply/deploy to real environments without permission; plan/validate/dry-run only. Never claim done/fixed/working without showing the verifying output."
+emit UserPromptSubmit "Rules reminder: start a new task with \`Size: small|medium|large|quick\` (\"quick\" = skip ceremony) and follow the matching process. Medium → short plan, wait for OK, refuter before handoff; large → load the \`team\` skill, refuter never skipped. No git writes; leave changes uncommitted. No apply/deploy to real environments without permission; plan/validate/dry-run only. Never claim done/fixed/working without showing the verifying output."
