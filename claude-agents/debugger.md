@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Root-cause analysis only, for a failure that survived a Builder fix round and whose cause is unclear. Diagnoses, never applies a fix.
-tools: [view_file, list_dir, find_by_name, grep_search, run_command, command_status]
+tools: Read, Grep, Glob, Bash
 model: inherit
 ---
 

@@ -14,17 +14,20 @@ Small or medium task? Don't use this skill; do the work yourself.
 
 ## Roles
 
-| Role | Model | Can edit | Does |
-|------|-------|----------|------|
-| `scout` | haiku | no | Finds files, symbols, call sites; reports `path:line` locations |
-| `researcher` | sonnet | no | Verifies facts (code behavior, docs, patterns to reuse), marks `UNVERIFIED:` |
-| `builder` | sonnet | yes | Implements one spec test-first, reports actual verification output |
-| `refuter` | opus | no | Re-checks the work against the spec and re-runs verification itself |
-| `debugger` | opus | no | Root cause only, when a failure survives a fix round |
+| Role | Can edit | Does |
+|------|----------|------|
+| `scout` | no | Finds files, symbols, call sites; reports `path:line` locations |
+| `researcher` | no | Verifies facts (code behavior, docs, patterns to reuse), marks `UNVERIFIED:` |
+| `builder` | yes | Implements one spec test-first, reports actual verification output |
+| `refuter` | no | Re-checks the work against the spec and re-runs verification itself |
+| `debugger` | no | Root cause only, when a failure survives a fix round |
 
-In Claude Code they're `duty-framework:<role>` subagents. Elsewhere, start a
-general subagent and paste the role's brief from this plugin's
-`agents/<role>.md` into its instructions.
+Every role runs on the session's default model unless the user personalised it
+with the `agents` skill. They're `duty-framework:<role>` subagents in Claude
+Code and Copilot, `<role>` in agy. If a personal `duty-<role>` agent exists
+(Claude Code, agy), use it instead: same role, the user's model. On a tool
+without these agents, start a general subagent and paste the role's brief from
+this plugin's `roles/<role>.md` into its instructions.
 
 ## Decide the team
 

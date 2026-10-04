@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Generates the per-platform agent files from roles/*.md (name, description, instructions).
+# Each platform wants different frontmatter, so only the lines below differ.
+# Every role uses the session's default model; scripts/personalize sets per-user choices.
+#   agents/          Antigravity (only reads agents/; model is a tier, native tool names)
+#   claude-agents/   Claude Code (model: inherit = session default, Claude tool names)
+#   copilot-agents/  Copilot CLI (no model = session default, Copilot tool names)
+# Usage: scripts/build-agents [output-root]   (default: repo root)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-$ROOT}"
+
+frontmatter() { # platform, role
+  case "$1:$2" in
+    claude:scout)       printf 'tools: Read, Grep, Glob\nmodel: inherit\n' ;;
+    claude:researcher)  printf 'tools: Read, Grep, Glob, WebFetch, WebSearch\nmodel: inherit\n' ;;
+    claude:builder)     printf 'disallowedTools: Agent\nmodel: inherit\n' ;;
+    claude:refuter|claude:debugger)
+                        printf 'tools: Read, Grep, Glob, Bash\nmodel: inherit\n' ;;
+
+    agy:scout)          printf 'tools: [view_file, list_dir, find_by_name, grep_search]\nmodel: inherit\n' ;;
+    agy:researcher)     printf 'tools: [view_file, list_dir, find_by_name, grep_search, read_url_content, search_web]\nmodel: inherit\n' ;;
+    agy:builder)        printf 'tools: [view_file, list_dir, find_by_name, grep_search, replace_file_content, multi_replace_file_content, write_to_file, run_command, command_status]\nmodel: inherit\n' ;;
+    agy:refuter|agy:debugger)
+                        printf 'tools: [view_file, list_dir, find_by_name, grep_search, run_command, command_status]\nmodel: inherit\n' ;;
+
+    copilot:scout)      printf 'tools: read, search\n' ;;
+    copilot:researcher) printf 'tools: read, search, web\n' ;;
+    copilot:builder)    printf 'tools: read, edit, search, execute\n' ;;
+    copilot:refuter|copilot:debugger)
+                        printf 'tools: read, search, execute\n' ;;
+  esac
+}
+
+for pair in agy:agents claude:claude-agents copilot:copilot-agents; do
+  platform="${pair%%:*}" dir="$OUT/${pair#*:}"
+  mkdir -p "$dir"
+  for src in "$ROOT"/roles/*.md; do
+    role="$(basename "$src" .md)"
+    {
+      echo '---'
+      grep -E '^(name|description):' "$src"
+      frontmatter "$platform" "$role"
+      echo '---'
+      awk 'n >= 2; /^---$/ { n++ }' "$src"
+    } > "$dir/$role.md"
+  done
+  echo "wrote $dir"
+done

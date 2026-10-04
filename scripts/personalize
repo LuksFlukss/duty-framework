@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Per-user model and effort for the role agents, saved in ~/.config/duty-framework/agents.json
+# and applied to each tool in its own way:
+#   copilot  ~/.copilot/settings.json -> subagents.agents["duty-framework:<role>"] (built-in override)
+#   claude   ~/.claude/agents/duty-<role>.md        personal copy (Claude has no per-agent override)
+#   agy      ~/.gemini/config/agents/duty-<role>.md personal copy (tiers only, no effort)
+# Usage:
+#   personalize models <tool>                 models you can pick
+#   personalize efforts <tool> <model>        efforts that model supports (none = no effort;
+#                                             copilot: checked with Copilot on first use, remembered)
+#   personalize show <tool>                   current choice per role
+#   personalize set <tool> <role> <model|default> [effort|default]
+#   personalize apply                         rewrite every saved choice (after a plugin update)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/duty-framework/agents.json"
+COPILOT_SETTINGS="${COPILOT_HOME:-$HOME/.copilot}/settings.json"
+ROLES="scout researcher builder refuter debugger"
+TOOLS="claude copilot agy"
+
+die() { echo "personalize: $*" >&2; exit 1; }
+in_list() { printf '%s\n' "$2" | grep -qxF -- "$1"; }
+json_edit() { # file, jq args... (creates the file, writes atomically)
+  local f="$1"; shift
+  mkdir -p "$(dirname "$f")"; [ -s "$f" ] || echo '{}' > "$f"
+  local tmp; tmp="$(mktemp "$f.XXXXXX")"
+  jq "$@" "$f" > "$tmp" && mv "$tmp" "$f"
+}
+
+models() {
+  case "$1" in
+    copilot) copilot help config 2>/dev/null \
+               | awk '/^  `model`:/ { f = 1; next } f && /^  `/ { exit } f && /^ *- "/ { gsub(/^ *- "|"$/, ""); print }' ;;
+    claude)  { printf '%s\n' haiku sonnet opus fable
+               for f in "$HOME"/.claude/cache/model-catalog/*-cc.json; do
+                 [ -f "$f" ] && jq -r '.catalog.config.models[].id' "$f" 2>/dev/null
+               done; } | awk '!seen[$0]++' ;;
+    agy)     printf '%s\n' flash_lite flash pro ;;
+    *)       die "unknown tool '$1' (claude, copilot, agy)" ;;
+  esac
+}
+
+COPILOT_EFFORTS="${XDG_CONFIG_HOME:-$HOME/.config}/duty-framework/copilot-efforts.json"
+copilot_known() { # model, effort -> ok | unsupported | no-effort | (empty: not checked yet)
+  [ -s "$COPILOT_EFFORTS" ] && jq -r --arg m "$1" --arg e "$2" '.[$m]["*"] // .[$m][$e] // empty' "$COPILOT_EFFORTS" || true
+}
+copilot_check() { # model, effort: Copilot only reveals support by trying (one tiny request), so remember the answer
+  local known out result
+  known="$(copilot_known "$1" "$2")"
+  if [ -z "$known" ]; then
+    if out="$(timeout 180 copilot --model "$1" --reasoning-effort "$2" -p "reply ok" -s 2>&1)"; then result=ok
+    elif grep -q 'does not support reasoning effort' <<<"$out"; then result=no-effort
+    elif grep -q 'is not supported for model' <<<"$out"; then result=unsupported
+    else die "couldn't check effort '$2' for $1 with Copilot: $(head -1 <<<"$out")"; fi
+    local key="$2"; [ "$result" = no-effort ] && key='*'
+    json_edit "$COPILOT_EFFORTS" --arg m "$1" --arg k "$key" --arg r "$result" '.[$m][$k] = $r'
+    known="$result"
+  fi
+  case "$known" in
+    ok) ;;
+    no-effort) die "Copilot: $1 takes no effort setting (pick default)" ;;
+    *) die "Copilot: effort '$2' is not supported for $1" ;;
+  esac
+}
+
+efforts() { # tool, model
+  case "$1" in
+    copilot) for e in none minimal low medium high xhigh max; do
+               case "$(copilot_known "$2" "$e")" in no-effort) return ;; unsupported) ;; *) echo "$e" ;; esac
+             done ;;
+    claude)  case "$2" in
+               haiku) ;;
+               sonnet|opus|fable) printf '%s\n' low medium high xhigh max ;;
+               *) for f in "$HOME"/.claude/cache/model-catalog/*-cc.json; do
+                    [ -f "$f" ] && jq -r --arg m "$2" '.catalog.config.models[] | select(.id == $m) | .thinking.effort_options // [] | .[].id' "$f" 2>/dev/null
+                  done | awk '!seen[$0]++' ;;
+             esac ;;
+    agy)     ;;
+    *)       die "unknown tool '$1' (claude, copilot, agy)" ;;
+  esac
+}
+
+saved() { [ -s "$CFG" ] && jq -c --arg t "$1" --arg r "$2" '.[$t][$r] // empty' "$CFG" || true; }
+
+personal_copy() { # source agent file, role, model, effort -> stdout
+  awk -v name="duty-$2" -v model="$3" -v effort="$4" '
+    /^---$/ { n++ }
+    n == 1 && /^name:/  { print "name: " name; next }
+    n == 1 && /^model:/ { print "model: " model; if (effort != "") print "effort: " effort; next }
+    { print }' "$1"
+}
+
+apply_one() { # tool, role
+  local entry model="" effort=""
+  entry="$(saved "$1" "$2")"
+  if [ -n "$entry" ]; then
+    model="$(jq -r '.model' <<<"$entry")"; effort="$(jq -r '.effort // ""' <<<"$entry")"
+  fi
+  case "$1" in
+    copilot)
+      if [ -n "$model" ]; then
+        json_edit "$COPILOT_SETTINGS" --arg k "duty-framework:$2" --arg m "$model" --arg e "$effort" \
+          '.subagents.agents[$k] = ({model: $m} + (if $e == "" then {} else {effortLevel: $e} end))'
+      elif [ -f "$COPILOT_SETTINGS" ]; then
+        json_edit "$COPILOT_SETTINGS" --arg k "duty-framework:$2" 'del(.subagents.agents[$k])
+          | if .subagents.agents == {} then del(.subagents.agents) else . end
+          | if .subagents == {} then del(.subagents) else . end'
+      fi ;;
+    claude|agy)
+      local src dest
+      if [ "$1" = claude ]; then src="$ROOT/claude-agents/$2.md" dest="$HOME/.claude/agents/duty-$2.md"
+      else src="$ROOT/agents/$2.md" dest="$HOME/.gemini/config/agents/duty-$2.md"; fi
+      if [ -n "$model" ]; then
+        [ -f "$src" ] || die "missing $src"
+        mkdir -p "$(dirname "$dest")"; personal_copy "$src" "$2" "$model" "$effort" > "$dest"
+      else
+        rm -f "$dest"
+      fi ;;
+  esac
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  models)  [ $# -eq 1 ] || die "usage: models <tool>"; models "$1" ;;
+  efforts) [ $# -eq 2 ] || die "usage: efforts <tool> <model>"; efforts "$1" "$2" ;;
+  show)
+    [ $# -eq 1 ] && in_list "$1" "$(printf '%s\n' $TOOLS)" || die "usage: show <claude|copilot|agy>"
+    for r in $ROLES; do
+      e="$(saved "$1" "$r")"
+      printf '%-11s %-26s %s\n' "$r" "$( [ -n "$e" ] && jq -r .model <<<"$e" || echo default)" \
+        "$( [ -n "$e" ] && jq -r '.effort // "default"' <<<"$e" || echo default)"
+    done ;;
+  set)
+    [ $# -ge 3 ] && [ $# -le 4 ] || die "usage: set <tool> <role> <model|default> [effort|default]"
+    tool="$1" role="$2" model="$3" effort="${4:-default}"
+    in_list "$tool" "$(printf '%s\n' $TOOLS)" || die "unknown tool '$tool' (claude, copilot, agy)"
+    in_list "$role" "$(printf '%s\n' $ROLES)" || die "unknown role '$role' ($ROLES)"
+    if [ "$model" = default ]; then
+      json_edit "$CFG" --arg t "$tool" --arg r "$role" 'del(.[$t][$r])'
+    else
+      in_list "$model" "$(models "$tool")" || die "'$model' is not an available $tool model (see: personalize models $tool)"
+      if [ "$effort" != default ]; then
+        in_list "$effort" "$(efforts "$tool" "$model")" || die "'$effort' is not a valid effort for $tool $model (valid: $(efforts "$tool" "$model" | tr '\n' ' ')none if empty)"
+        [ "$tool" = copilot ] && copilot_check "$model" "$effort"
+      fi
+      json_edit "$CFG" --arg t "$tool" --arg r "$role" --arg m "$model" --arg e "$effort" \
+        '.[$t][$r] = ({model: $m} + (if $e == "default" then {} else {effort: $e} end))'
+    fi
+    apply_one "$tool" "$role"
+    echo "$tool $role: $model${4:+ ($effort)}" ;;
+  apply)
+    for t in $TOOLS; do for r in $ROLES; do [ -n "$(saved "$t" "$r")" ] && apply_one "$t" "$r"; done; done
+    echo "applied saved choices from $CFG" ;;
+  *) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 1 ;;
+esac

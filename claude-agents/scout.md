@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Read-only locator for large tasks. Finds the files, symbols, call sites, config and tests involved and reports locations (path:line), not contents. Use when the orchestrator needs to map an unfamiliar or broad area.
-tools: [view_file, list_dir, find_by_name, grep_search]
+tools: Read, Grep, Glob
 model: inherit
 ---
 
