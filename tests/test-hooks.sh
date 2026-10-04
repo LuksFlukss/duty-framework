@@ -42,4 +42,20 @@ for skill in design plan tdd debugging verify-and-handoff; do
   check "session-start lists skill $skill" ".hookSpecificOutput.additionalContext | contains(\"- $skill:\")"
 done
 
+if command -v agy >/dev/null; then
+  out=$(agy plugin validate "$ROOT" 2>&1)
+  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 5 processed'; then
+    echo "ok   agy plugin validate"
+  else
+    echo "FAIL agy plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))
+  fi
+  if grep -qx 'trigger: always_on' "$ROOT/rules/duty-framework.md" 2>/dev/null; then
+    echo "ok   agy always_on rule"
+  else
+    echo "FAIL agy always_on rule"; fails=$((fails + 1))
+  fi
+else
+  echo "skip agy plugin validate (agy not installed)"
+fi
+
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

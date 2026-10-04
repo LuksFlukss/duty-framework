@@ -1,12 +1,12 @@
 # duty-framework
 
-My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code, GitHub Copilot CLI and Gemini CLI, plus five small skills. A lean take on [superpowers](https://github.com/obra/superpowers): no worktrees, no branches, no commits — all changes stay local for review.
+My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code, GitHub Copilot CLI and Antigravity CLI, plus five small skills. A lean take on [superpowers](https://github.com/obra/superpowers): no worktrees, no branches, no commits — all changes stay local for review.
 
 - **Session start** injects `RULES.md` and the skill list (also after `/clear` and compaction).
 - **Every prompt** gets a one-line reminder: size the task, no git writes, verify before "done".
 - **Skills:** `design`, `plan`, `tdd`, `debugging`, `verify-and-handoff`.
 
-Gemini CLI doesn't use the hooks; it gets the same rules and skills through `GEMINI.md`, which is sent with every request.
+Antigravity CLI doesn't use the hooks; it gets the same rules through an `always_on` rule (`rules/duty-framework.md`, which includes `RULES.md`) that is sent with every request, and loads the same skills.
 
 ## Install
 
@@ -32,24 +32,19 @@ copilot plugin marketplace update duty-framework
 copilot plugin update duty-framework
 ```
 
-Gemini CLI:
-
-```bash
-gemini extensions install https://github.com/LuksFlukss/duty-framework
-
-# update
-gemini extensions update duty-framework
-```
-
-Older Gemini CLI without `gemini extensions install`: clone and link instead.
+Antigravity CLI:
 
 ```bash
 git clone https://github.com/LuksFlukss/duty-framework ~/duty-framework
-ln -s ~/duty-framework ~/.gemini/extensions/duty-framework
-gemini -l   # should list duty-framework
+agy plugin install ~/duty-framework
+agy plugin list   # should list duty-framework
+
+# update
+git -C ~/duty-framework pull
+agy plugin uninstall duty-framework && agy plugin install ~/duty-framework
 ```
 
-Local checkout instead of GitHub: replace `LuksFlukss/duty-framework` with the path, e.g. `~/duty-framework`, or load it per session with `--plugin-dir ~/duty-framework` (Claude, Copilot).
+Local checkout instead of GitHub (Claude, Copilot): replace `LuksFlukss/duty-framework` with the path, e.g. `~/duty-framework`, or load it per session with `--plugin-dir ~/duty-framework` (Claude, Copilot).
 
 ## Test
 
