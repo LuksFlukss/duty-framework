@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Copilot CLI only: after a file view, nudges toward the terraform skill when the file is *.tf or *.tfvars.
+# Silent elsewhere: Claude Code already loads the skill through its `paths` frontmatter.
+# Copilot sends the path in .tool_input.path, Claude Code in .tool_input.file_path.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/hooks/emit.sh"
+
+[ -n "${COPILOT_CLI:-}" ] || exit 0
+
+path=$(jq -r '.tool_input.path // .tool_input.file_path // empty' 2>/dev/null || true)
+case "$path" in
+  *.tf|*.tfvars) emit PostToolUse 'Terraform file viewed: load the `terraform` skill (duty-terraform) before working on it.' ;;
+esac
+exit 0

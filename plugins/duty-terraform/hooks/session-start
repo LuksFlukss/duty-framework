@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Nudges toward the terraform skill when the working directory holds Terraform files. Silent otherwise.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/hooks/emit.sh"
+
+found=$(find . -maxdepth 3 -name .terraform -prune -o -name '*.tf' -type f -print 2>/dev/null | head -1 || true)
+[ -n "$found" ] || exit 0
+
+emit SessionStart 'Terraform files detected: load the `terraform` skill (duty-terraform) before working on Terraform; delegate Terraform work to the terraform agent.'

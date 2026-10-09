@@ -6,8 +6,14 @@
     {
       "name": "duty-framework",
       "description": "Always-on working rules plus eight small skills",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "source": "./"
+    },
+    {
+      "name": "duty-terraform",
+      "description": "Optional Terraform add-on: skill, specialist agent and the Terraform MCP server for Azure and AWS",
+      "version": "0.1.0",
+      "source": "./plugins/duty-terraform"
     }
   ]
 }

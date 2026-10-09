@@ -107,6 +107,36 @@ Ask "explain the flow" (or "explain this repo", "how does X work") for the `expl
 4. ends with 3–5 suggestions and questions, only ones that really apply
 5. asks whether to save the explanation as a Markdown file (e.g. `FLOW.md`), and writes it only on a yes
 
+## Optional: Terraform add-on
+
+`duty-terraform` (in `plugins/duty-terraform/`) sits on top of the core plugin for Terraform work on Azure (`azurerm`, `azapi`, Azure Verified Modules) and AWS (`aws`, `terraform-aws-modules`). It adds:
+
+- a `terraform` skill (research, write/change code, review a plan or PR, upgrade providers/modules) that loads only when you work with `*.tf` / `*.tfvars` files (Antigravity: a glob rule; Copilot: a hook nudge)
+- a `terraform` specialist agent
+- HashiCorp's [Terraform MCP server](https://github.com/hashicorp/terraform-mcp-server), public registry tools only, so provider, module and upgrade-guide docs are live, not from memory
+
+Requires Docker running: the MCP server starts in a container, and without Docker it fails with `duty-terraform needs Docker: start Docker, then restart the session.` There is no web or memory fallback.
+
+Claude Code:
+
+```bash
+claude plugin install duty-terraform@duty-framework
+```
+
+GitHub Copilot CLI:
+
+```bash
+copilot plugin install duty-terraform@duty-framework
+```
+
+Antigravity CLI:
+
+```bash
+agy plugin install ~/duty-framework/plugins/duty-terraform
+```
+
+What it may run: reading files, `terraform fmt`, `terraform init -backend=false`, `terraform validate`, `tflint`, `git ls-remote`. It never runs `terraform plan`, a normal `init`, `init -upgrade`, apply, destroy, import, state commands, taint or workspace changes; when a plan is needed it gives you the commands and reviews the saved plan file once you say it ran. Lock-file conflicts are handed back to you: remove `.terraform/` and `.terraform.lock.hcl` yourself, then tell it to continue. Its tests: `plugins/duty-terraform/tests/test-terraform.sh` (also run by `tests/test-hooks.sh`).
+
 ## Develop
 
 - Role instructions live in `roles/<role>.md`. Don't edit `agents/`, `claude-agents/` or `copilot-agents/` by hand: run `scripts/build-agents` to regenerate them (the per-CLI frontmatter is in that script). The tests fail if they're out of date.

@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "duty-terraform",
+  "description": "Optional add-on for duty-framework: Terraform skill, specialist agent and the Terraform MCP server (live registry docs) for Azure and AWS"
+}

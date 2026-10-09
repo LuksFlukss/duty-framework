@@ -1,0 +1,12 @@
+{
+  "name": "duty-terraform",
+  "description": "Optional add-on for duty-framework: Terraform skill, specialist agent and the Terraform MCP server (live registry docs) for Azure and AWS",
+  "version": "0.1.0",
+  "author": {
+    "name": "Louka Vanhoucke"
+  },
+  "license": "MIT",
+  "agents": [
+    "./claude-agents/terraform.md"
+  ]
+}

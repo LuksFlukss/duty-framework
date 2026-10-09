@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "terraform": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "docker info >/dev/null 2>&1 || { echo \"duty-terraform needs Docker: start Docker, then restart the session.\" >&2; exit 1; }; exec docker run -i --rm hashicorp/terraform-mcp-server:1.3.0 stdio --toolsets=registry"
+      ]
+    }
+  }
+}

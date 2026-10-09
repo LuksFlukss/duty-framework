@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Generates the per-platform agent files from roles/*.md (name, description, instructions).
+#   agents/          Antigravity (only reads agents/; model is a tier, native tool names)
+#   claude-agents/   Claude Code (no tools list + disallowedTools keeps the MCP tools; model: inherit)
+#   copilot-agents/  Copilot CLI (omitting tools enables all tools, MCP included; no model = session default)
+# Usage: scripts/build-agents [output-root]   (default: plugin root)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-$ROOT}"
+
+frontmatter() { # platform, role
+  case "$1:$2" in
+    claude:terraform)  printf 'disallowedTools: Agent\nmodel: inherit\n' ;;
+    # agy: tool list copied from the core builder; inheritMcp: true gives the agent the MCP tools
+    agy:terraform)     printf 'tools: [view_file, list_dir, find_by_name, grep_search, replace_file_content, multi_replace_file_content, write_to_file, run_command, command_status]\nmodel: inherit\ninheritMcp: true\n' ;;
+    copilot:terraform) : ;;
+  esac
+}
+
+for pair in agy:agents claude:claude-agents copilot:copilot-agents; do
+  platform="${pair%%:*}" dir="$OUT/${pair#*:}"
+  mkdir -p "$dir"
+  for src in "$ROOT"/roles/*.md; do
+    role="$(basename "$src" .md)"
+    {
+      echo '---'
+      grep -E '^(name|description):' "$src"
+      frontmatter "$platform" "$role"
+      echo '---'
+      awk 'n >= 2; /^---$/ { n++ }' "$src"
+    } > "$dir/$role.md"
+  done
+  echo "wrote $dir"
+done

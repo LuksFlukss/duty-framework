@@ -20,6 +20,15 @@ jq -ncR '
 
   # one JSON entry per line; malformed lines are skipped
   [ inputs | fromjson? | objects ]
+  # background agents that reported back (task-notification, any status), by launching tool_use id.
+  # On resume a "stopped" notification carries only <task-id>: the agentId from the launch result.
+  | [ .[] | select(.type != "assistant") | .. | strings | select(startswith("<task-notification>")) ] as $notes
+  | [ .[] | select(.type == "user") | .message.content? | arrays | .[] | select(.type? == "tool_result")
+      | { id: .tool_use_id, ag: (.content | if type == "array" then map(.text? // "") | join("\n")
+          elif type == "string" then . else "" end | capture("agentId: (?<a>[A-Za-z0-9]+)").a) } ] as $launched
+  | [ $notes[] | capture("<task-id>(?<t>[^<]+)</task-id>"; "g").t ] as $doneTasks
+  | ([ $notes[] | capture("<tool-use-id>(?<id>[^<]+)</tool-use-id>"; "g").id ]
+     + [ $launched[] | select(.ag as $a | $doneTasks | index($a)) | .id ]) as $done
   # ordered events: turn boundaries, assistant text and tool_use blocks
   | [ .[] | if boundary then {type: "boundary"}
             elif .type == "assistant" then .message.content? | arrays | .[] | select(.type == "text" or .type == "tool_use")
@@ -33,6 +42,9 @@ jq -ncR '
         else . end) | .size) as $size
   | select($size != null and ($size.s == "medium" or $size.s == "large"))
   | [ $ev[$size.i + 1:] | to_entries[] | .key += $size.i + 1 ] as $after
+  # a background builder still running: nothing to review yet
+  | select([ $after[].value | select(agent("builder") and ((.input.run_in_background | tostring) == "true")) | .id ]
+      - $done | length == 0)
   | ([ $after[] | select(.value | edit) | .key ] | last) as $lastEdit
   | select($lastEdit != null)
   | ([ $ev[$lastEdit + 1:][] | select(agent("refuter")) ] | length > 0) as $refuted

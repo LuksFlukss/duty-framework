@@ -122,11 +122,14 @@ rm -rf "$tmp"
 
 out=$(cat "$ROOT/.claude-plugin/plugin.json")
 check "claude manifest lists claude-agents" '[.agents[]] | sort == ["./claude-agents/builder.md","./claude-agents/debugger.md","./claude-agents/refuter.md","./claude-agents/researcher.md","./claude-agents/scout.md"]'
-check "claude manifest version 0.4.0" '.version == "0.4.0"'
+check "claude manifest version 0.4.1" '.version == "0.4.1"'
 out=$(cat "$ROOT/.claude-plugin/marketplace.json")
-check "marketplace version 0.4.0" '.plugins[0].version == "0.4.0"'
+check "marketplace version 0.4.1" '.plugins[0].version == "0.4.1"'
+tf_version=$(jq -r .version "$ROOT/plugins/duty-terraform/.claude-plugin/plugin.json" 2>/dev/null)
+check "marketplace lists duty-terraform at the add-on's manifest version" \
+  ".plugins[1].name == \"duty-terraform\" and .plugins[1].source == \"./plugins/duty-terraform\" and (.plugins[1].version == \"$tf_version\") and (\"$tf_version\" != \"\")"
 out=$(cat "$ROOT/.plugin/plugin.json" 2>/dev/null)
-check "copilot manifest points at copilot-agents" '.name == "duty-framework" and .agents == "./copilot-agents" and .version == "0.4.0"'
+check "copilot manifest points at copilot-agents" '.name == "duty-framework" and .agents == "./copilot-agents" and .version == "0.4.1"'
 
 # team skill: no fixed models, knows about personal agents
 ! grep -qE '^\| `[a-z]+` \| (haiku|sonnet|opus) \|' "$ROOT/skills/team/SKILL.md"
@@ -307,6 +310,26 @@ fx h "$(txt 'Size: medium')" "$(W /home/u/.claude/projects/x/memory/m.md)"; allo
 fx i1 "$(txt 'Size: medium')" "$(AG duty-framework:builder)"; blocks "medium, builder counts as edit" i1
 fx i2 "$(txt 'Size: medium')" "$(AG duty-builder)"; blocks "medium, personal duty-builder counts as edit" i2
 fx i3 "$(txt 'Size: medium')" "$(AG duty-builder)" "$(AG duty-refuter)"; allows "medium, personal duty-refuter" i3
+# background builder: no refuter needed until its task-notification (status any) arrives
+BG()   { jq -cn --arg s "$1" --arg id "$2" --argjson b "${3:-\"true\"}" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Agent",input:{subagent_type:$s,run_in_background:$b}}]}}'; }
+DONE() { jq -cn --arg id "$1" --arg st "${2:-completed}" '{type:"attachment",attachment:{type:"queued_command",prompt:("<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>\($id)</tool-use-id>\n<status>\($st)</status>\n</task-notification>")}}'; }
+fx n1 "$(txt 'Size: medium')" "$(BG duty-builder b1)"; allows "medium, background builder still running" n1
+fx n2 "$(txt 'Size: medium')" "$(BG duty-builder b1 true)"; allows "background builder, run_in_background as boolean" n2
+fx n3 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(DONE b1)"; blocks "medium, background builder reported back, no refuter" n3
+fx n4 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(DONE b1 failed)"; blocks "background builder failed counts as reported back" n4
+fx n5 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(DONE b1)" "$(AG duty-refuter)"; allows "background builder reported back, then refuter" n5
+fx n6 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(DONE b2)"; allows "notification for another task doesn't count" n6
+fx n7 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(DONE b1)" "$(BG duty-builder b2)"; allows "second background builder still running" n7
+fx n8 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(W)"; allows "edit while a background builder runs" n8
+fx n9 "$(txt 'Size: medium')" "$(BG duty-builder b1 false)"; blocks "foreground builder (run_in_background false) unchanged" n9
+# resumed session: the "stopped" notification carries only the task-id (the agentId from the launch result)
+LR()   { jq -cn --arg id "$1" --arg ag "$2" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:[{type:"text",text:("Async agent launched successfully.\nagentId: \($ag) (internal ID - do not mention to user.)")}]}]}}'; }
+STOP() { jq -cn --arg ag "$1" '{type:"user",message:{role:"user",content:("<task-notification>\n<task-id>\($ag)</task-id>\n<status>stopped</status>\n<summary>Background agent didn'"'"'t finish before the previous session ended</summary>\n</task-notification>")}}'; }
+fx p1 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(LR b1 a1)" "$(STOP a1)"; blocks "background builder stopped on resume (task-id only) counts as reported back" p1
+fx p2 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(LR b1 a1)" "$(STOP a9)"; allows "task-id of another agent doesn't count" p2
+fx p3 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(LR b2 a1)" "$(STOP a1)"; allows "agentId from another launch doesn't count" p3
+TWO()  { jq -cn '{type:"user",message:{role:"user",content:"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>\n</task-notification>\n<task-notification>\n<task-id>a2</task-id>\n<tool-use-id>b2</tool-use-id>\n<status>completed</status>\n</task-notification>"}}'; }
+fx p4 "$(txt 'Size: medium')" "$(BG duty-builder b1)" "$(BG duty-builder b2)" "$(TWO)"; blocks "two notifications in one message both count" p4
 fx j "$(txt 'Size: small')" "$(W)"
 allows "last_assistant_message is ignored (medium there, small in transcript)" j 'Size: medium'
 allows "last_assistant_message is ignored (medium there, no label in transcript)" f3 'Size: medium'
@@ -384,6 +407,13 @@ if command -v agy >/dev/null; then
   fi
 else
   echo "skip agy plugin validate (agy not installed)"
+fi
+
+# duty-terraform add-on has its own tests
+if out=$("$ROOT/plugins/duty-terraform/tests/test-terraform.sh" 2>&1); then
+  echo "ok   duty-terraform tests"
+else
+  echo "FAIL duty-terraform tests"; printf '%s\n' "$out" | grep -v '^ok'; fails=$((fails + 1))
 fi
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
