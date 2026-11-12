@@ -13,6 +13,10 @@ review at the end.
 Small task? Don't use this skill. Medium task: after the user's OK,
 do the work yourself, but run steps 4–5 (refute, send back) before handoff.
 
+Orchestrating a large task is the one job for the strongest model (Fable in
+Claude Code). If this session runs on a weaker one, say so once before step 1
+and let the user switch (`/model`) or carry on; you can't switch it yourself.
+
 ## Roles
 
 | Role | Can edit | Does |

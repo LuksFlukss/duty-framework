@@ -3,8 +3,11 @@
 My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code, GitHub Copilot CLI and Antigravity CLI, plus small skills and a team of role subagents. A lean take on [superpowers](https://github.com/obra/superpowers): no worktrees, no branches, no commits — all changes stay local for review.
 
 - **Session start** injects `RULES.md` and the skill list (also after `/clear` and compaction).
-- **Subagents** (Claude Code) get `RULES.md` too, with a note to report questions back instead of asking the user.
+- **Subagents** (Claude Code) get the parts of `RULES.md` that apply to them (git, real environments, test first, debug, best solution, verify), with a note to report questions back instead of asking the user.
 - **Every prompt** gets a one-line reminder: size the task, no git writes, verify before "done".
+- **Command guard** (Claude Code): a `PreToolUse` hook blocks git writes (`commit`, `push`, `reset`, ...) and apply/deploy commands (`terraform`/`tofu`/`terragrunt apply`, `kubectl apply`, `helm upgrade`, `pulumi up`, `npm publish`, `docker push`, `gh release create`, and write commands of `az` and `aws`, ...) before they run, in the main session and in subagents. A safety net, not a security boundary: `bash -c` or scripts get past it. To allow them for a session, start Claude Code with `DUTY_ALLOW_GIT_WRITE=1` and/or `DUTY_ALLOW_APPLY=1`.
+- **Stop gate:** a `Stop` hook blocks handing off a medium or large task that has edits but no refuter review (large: also no `team` skill). It reads the `Size:` label from the transcript. `DUTY_DEBUG=1` makes it log each decision to `${CLAUDE_PLUGIN_DATA}/stop-gate.log` (fallback `$TMPDIR/duty-framework/`).
+- **Edit tracking** (Claude Code, git repos only, not Copilot): a `PreToolUse`/`PostToolUse` hook on Bash (`hooks/edit-track`) records the Bash calls that changed file contents in the git working tree, so the stop gate counts `sed -i` or `cat > file` edits too, not just `Edit`/`Write`. Commits, `git add` and rewrites with identical content don't count.
 - **Skills:** `design`, `plan`, `tdd`, `debugging`, `verify-and-handoff`, `team` (orchestrate the role agents on large tasks), `agents` (personalise their model and effort), `explain` (walk through a repo's flow).
 - **Role agents** on all three CLIs: `scout`, `researcher`, `builder`, `refuter`, `debugger`.
 
@@ -47,7 +50,7 @@ claude plugin marketplace update duty-framework
 claude plugin update duty-framework@duty-framework
 ```
 
-Claude Code stays on the installed `version` until it changes, so when you change the plugin, bump `version` in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `.plugin/plugin.json` before pushing.
+Claude Code stays on the installed `version` until it changes, so when you change the plugin, run `scripts/bump duty-framework <N.N.N>` (it sets `version` in `.claude-plugin/plugin.json`, `.plugin/plugin.json` and `.claude-plugin/marketplace.json`) before pushing.
 
 GitHub Copilot CLI:
 
@@ -68,6 +71,8 @@ Personalised agents: run `scripts/personalize apply` after any update so your pe
 ## Agents
 
 Five role agents, used by the `team` skill: `scout` (finds code), `researcher` (checks facts), `builder` (implements test-first), `refuter` (re-checks the work), `debugger` (root cause only). By default every role runs on the session's default model.
+
+To keep token use down, keep the session on a mid-tier model and switch to the strongest one (Fable in Claude Code) only for large tasks; the `team` skill reminds you when a large task starts on a weaker model. Give the roles cheaper models with the `agents` skill below, e.g. `scout` haiku, `researcher` and `builder` sonnet, `refuter` opus, `debugger` fable.
 
 | CLI | Agent name | Loaded from |
 |-----|------------|-------------|
@@ -140,7 +145,7 @@ What it may run: reading files, `terraform fmt`, `terraform init -backend=false`
 ## Develop
 
 - Role instructions live in `roles/<role>.md`. Don't edit `agents/`, `claude-agents/` or `copilot-agents/` by hand: run `scripts/build-agents` to regenerate them (the per-CLI frontmatter is in that script). The tests fail if they're out of date.
-- When releasing, bump `version` in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `.plugin/plugin.json`.
+- When releasing, run `scripts/bump <duty-framework|duty-terraform> <N.N.N>`: it sets `version` in that plugin's manifests and its `.claude-plugin/marketplace.json` entry. The tests check they all match.
 
 ## Test
 

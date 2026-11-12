@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# Claude Code PreToolUse hook on Bash: denies git writes and apply/deploy commands before they run.
+# A safety net against mistakes, not a security boundary: bash -c, eval, scripts and aliases get past it.
+# Lifted for a session by starting Claude Code with DUTY_ALLOW_GIT_WRITE=1 or DUTY_ALLOW_APPLY=1;
+# an assignment inside the command itself is part of the command and lifts nothing.
+set -uo pipefail
+
+# Read stdin first, so the caller never writes into a closed pipe. Builtin read on fd 0:
+# Claude Code passes a socket, where opening /dev/stdin fails; no cat, so it works without PATH.
+IFS= read -r -d '' input || true
+[ -n "${COPILOT_CLI:-}" ] && exit 0
+command -v jq >/dev/null || exit 0
+cmd=$(printf '%s' "$input" | jq -r 'select(.tool_name == "Bash") | .tool_input.command | strings' 2>/dev/null) || exit 0
+[ -n "$cmd" ] || exit 0
+
+# Join backslash line continuations.
+cmd=${cmd//$'\\\n'/ }
+# Quoted text is an argument, not a command: replace it with a placeholder, unpadded so it stays
+# part of its word: an option's value (git -C "my dir" push, -c a="b", FOO='x' git push), never a command.
+q_re="\"([^\"\\\\]|\\\\.)*\"|'[^']*'"
+while [[ $cmd =~ $q_re ]]; do cmd=${cmd/"${BASH_REMATCH[0]}"/_q_}; done
+# Split into simple commands on ; & | ( ) ` < > and newlines.
+cmd=${cmd//$'\n'/;}
+cmd=${cmd//[|&()\`<>]/;}
+
+# Positional words of a command line (P), skipping options and the values of options that take one;
+# R: the words after the first positional (the subcommand's own arguments).
+positionals() { # tool, args...
+  local t=$1 vf=' ' skip=0 a n=0; shift; P=(); R=()
+  case $t in
+    git) vf=' -C -c --git-dir --work-tree --namespace --sort --format ' ;;
+    kubectl) vf=' -n --namespace --context --kubeconfig --cluster --user -s --server --as -f --filename -p --patch -o --output -l --selector -v ' ;;
+    helm) vf=' -n --namespace --kube-context --kubeconfig ' ;;
+    gh) vf=' -R --repo ' ;;
+    terragrunt) vf=' --terragrunt-working-dir --terragrunt-config --terragrunt-source --working-dir --config ' ;;
+    pulumi) vf=' -C --cwd -s --stack ' ;;
+    az) vf=' -n --name -g --resource-group --subscription -l --location --query -o --output --ids ' ;;
+    # aws: global options with a value, and the s3 transfer options whose value would pass for the last positional
+    aws) vf=' --region --profile --output --query --endpoint-url --color --cli-read-timeout --cli-connect-timeout --ca-bundle --cli-binary-format --exclude --include --acl --storage-class --sse --sse-kms-key-id --cache-control --content-type --content-disposition --content-encoding --content-language --expires --metadata --metadata-directive --grants --source-region --page-size ' ;;
+  esac
+  for a in "$@"; do
+    n=$((n + 1))
+    if [ $skip = 1 ]; then skip=0
+    elif [[ $vf == *" $a "* ]]; then skip=1
+    elif [[ $a != -* || $a == - ]]; then # a lone - is a positional (stdin/stdout)
+      [ ${#P[@]} -eq 0 ] && R=("${@:n+1}")
+      P+=("$a")
+    fi
+  done
+}
+has() { # word, args... : true if word is one of args
+  local w=$1 a; shift
+  for a in "$@"; do [ "$a" = "$w" ] && return 0; done
+  return 1
+}
+hasp() { # glob, args... : true if one of args matches the glob
+  local p=$1 a; shift
+  for a in "$@"; do [[ $a == $p ]] && return 0; done
+  return 1
+}
+
+# Prints "apply <label>" for terraform-style verbs (terraform, tofu, terragrunt): tool, verb, next word, word after.
+tf_verb() {
+  case $2 in
+    apply|destroy|import) echo "apply $1 $2" ;;
+    state) case $3 in rm|mv|push) echo "apply $1 state $3" ;; esac ;;
+  esac
+}
+
+# Prints "git <label>" or "apply <label>" for a blocked simple command.
+check() { # words...
+  local w=("$@") i=0 t pre=
+  # skip prefixes (sudo -u x, env -u x, nice -n 5, timeout -s KILL 60, VAR=val, shell keywords)
+  while [ $i -lt ${#w[@]} ]; do
+    case ${w[i]} in
+      sudo|time|nohup|command|exec|env|nice|timeout|if|then|else|elif|do|while|until|'!'|'{'|'}') pre=${w[i]}; i=$((i + 1)) ;;
+      [A-Za-z_]*=*) i=$((i + 1)) ;;
+      -*) [ -n "$pre" ] || break
+        case "$pre ${w[i]}" in
+          'sudo -u'|'sudo -g'|'env -u'|'nice -n'|'timeout -s'|'timeout -k') i=$((i + 2)) ;;
+          *) i=$((i + 1)) ;;
+        esac ;;
+      *) if [ "$pre" = timeout ] && [[ ${w[i]} =~ ^[0-9.]+[smhd]?$ ]]; then pre=; i=$((i + 1)); else break; fi ;;
+    esac
+  done
+  [ $i -lt ${#w[@]} ] || return 0
+  t=${w[i]##*/}; w=("${w[@]:i+1}")
+  # --dry-run (terraform: -dry-run, aws: --dryrun) only plans; --dry-run=none and =false are real runs
+  for a in "${w[@]}"; do [[ $a == --dry-run || $a == -dry-run || $a == --dryrun || ( $a == --dry-run=* && $a != --dry-run=none && $a != --dry-run=false ) ]] && return 0; done
+  positionals "$t" "${w[@]}"
+  local v=${P[0]:-} s=${P[1]:-}
+  case $t in
+    git)
+      case $v in
+        commit|push|pull|merge|rebase|reset|cherry-pick|revert|restore) echo "git git $v" ;;
+        stash) [ "$s" = list ] || [ "$s" = show ] || echo "git git stash" ;;
+        # subcommand options are checked in R only, so global options (-C dir, -c key=val) don't count
+        checkout) { has -- "${R[@]}" || hasp '-[bB]*' "${R[@]}"; } && echo "git git checkout" ;;
+        switch) { hasp '-[cC]*' "${R[@]}" || hasp '--create*' "${R[@]}"; } && echo "git git switch" ;;
+        branch)
+          for a in -d -D -m -M -c -C -f --delete --move --copy --force; do has $a "${R[@]}" && { echo "git git branch $a"; return; }; done
+          if [ ${#P[@]} -gt 1 ]; then
+            for a in -l --list -a --all -r --remotes --contains --no-contains --merged --no-merged --points-at; do has $a "${R[@]}" && return; done
+            echo "git git branch"
+          fi ;;
+        tag)
+          { has -d "${R[@]}" || has --delete "${R[@]}"; } && { echo "git git tag -d"; return; }
+          if [ ${#P[@]} -gt 1 ]; then
+            for a in -l --list -n -v --verify --contains --no-contains --merged --no-merged --points-at; do has $a "${R[@]}" && return; done
+            echo "git git tag"
+          fi ;;
+      esac ;;
+    gh)
+      case $v in
+        pr) { [ "$s" = create ] || [ "$s" = merge ]; } && echo "git gh pr $s" ;;
+        release) case $s in create|delete|upload|edit) echo "apply gh release $s" ;; esac ;;
+      esac ;;
+    terraform|tofu) tf_verb "$t" "$v" "$s" "${P[2]:-}" ;;
+    terragrunt)
+      # run-all apply, run --all apply: the terraform verb follows run-all / run
+      if [ "$v" = run-all ] || [ "$v" = run ]; then tf_verb terragrunt "$s" "${P[2]:-}"
+      elif [ "$v" = apply-all ] || [ "$v" = destroy-all ]; then echo "apply terragrunt $v"
+      else tf_verb terragrunt "$v" "$s"; fi ;;
+    pulumi) case $v in up|update|destroy) echo "apply pulumi $v" ;; esac ;;
+    npm|pnpm|yarn)
+      if [ "$v" = publish ] || { [ "$t" = yarn ] && [ "$v" = npm ] && [ "$s" = publish ]; }; then echo "apply $t publish"; fi ;;
+    docker) { [ "$v" = push ] || { [ "$v" = image ] && [ "$s" = push ]; }; } && echo "apply docker push" ;;
+    az)
+      # only the command words count (az group delete): the positionals from the first one up to the first option word.
+      # Option values (--tag start, --container-name stop) and words after an option never do.
+      local skip=0 started=0
+      for a in "${w[@]}"; do
+        if [ $skip = 1 ]; then skip=0
+        elif [[ $a == -* ]]; then
+          [ $started = 1 ] && break
+          [[ ' -n --name -g --resource-group --subscription -l --location --query -o --output --ids ' == *" $a "* ]] && skip=1
+        else
+          started=1
+          case $a in create|delete|update|set|add|remove|start|stop|restart|purge) echo "apply az $a"; return ;; esac
+        fi
+      done ;;
+    aws)
+      # aws <service> <operation>; s3 has high-level commands (rm, mv, ...) besides the s3api-style operations
+      case $s in
+        delete-*|create-*|put-*|update-*|terminate-*|modify-*|run-*|start-*|stop-*|reboot-*|attach-*|detach-*|associate-*|disassociate-*|register-*|deregister-*|enable-*|disable-*|tag-*|untag-*|restore-*|import-*|revoke-*|authorize-*|execute-*|send-*|deploy|invoke|publish)
+          echo "apply aws $v $s" ;;
+        rm|mv|rb) [ "$v" = s3 ] && echo "apply aws s3 $s" ;;
+        # cp and sync only write when the destination (last positional) is remote
+        cp|sync) [ "$v" = s3 ] && [[ ${P[${#P[@]}-1]} == s3://* ]] && echo "apply aws s3 $s" ;;
+      esac ;;
+    kubectl)
+      case $v in
+        apply|create|delete|patch|replace|scale) echo "apply kubectl $v" ;;
+        rollout) [ "$s" = restart ] && echo "apply kubectl rollout restart" ;;
+      esac ;;
+    helm) case $v in install|upgrade|uninstall|delete|rollback) echo "apply helm $v" ;; esac ;;
+  esac
+  return 0
+}
+
+IFS=';' read -ra segs <<<"$cmd"
+for seg in "${segs[@]}"; do
+  read -ra words <<<"$seg"
+  [ ${#words[@]} -gt 0 ] || continue
+  hit=$(check "${words[@]}")
+  [ -n "$hit" ] || continue
+  group=${hit%% *}; label=${hit#* }
+  if [ "$group" = git ]; then
+    [ "${DUTY_ALLOW_GIT_WRITE:-}" = 1 ] && continue
+    reason="duty-framework: \`$label\` is blocked: no git writes, leave all changes uncommitted for the user to review (RULES.md). If the user explicitly asked for it, ask them to run it themselves, or to restart Claude Code with DUTY_ALLOW_GIT_WRITE=1."
+  else
+    [ "${DUTY_ALLOW_APPLY:-}" = 1 ] && continue
+    reason="duty-framework: \`$label\` is blocked: real environments are read-only, use plan/validate/diff/--dry-run instead (RULES.md). If the user explicitly asked for it, ask them to run it themselves, or to restart Claude Code with DUTY_ALLOW_APPLY=1."
+  fi
+  jq -cn --arg r "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+  exit 0
+done
+exit 0

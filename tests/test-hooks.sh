@@ -45,6 +45,13 @@ check "prompt-nudge forbids apply/deploy" '.hookSpecificOutput.additionalContext
 run subagent-start CLAUDE_PLUGIN_ROOT="$ROOT"
 check "subagent-start claude: nested additionalContext with rules" \
   '.hookSpecificOutput.hookEventName == "SubagentStart" and (.hookSpecificOutput.additionalContext | contains("Never run `git commit`") and contains("Never apply, deploy") and contains("report the question back"))'
+run subagent-start CLAUDE_PLUGIN_ROOT="$ROOT"
+check "subagent-start injects the sections that matter to a subagent" \
+  '.hookSpecificOutput.additionalContext | contains("## Git: local changes only") and contains("## Real environments: read-only") and contains("## 3. Test first") and contains("## 4. Debug systematically") and contains("## 5. Best solution, not overcomplicated") and contains("## 6. Verify before claiming done")'
+check "subagent-start keeps its intro lines" \
+  '.hookSpecificOutput.additionalContext | contains("You are a subagent.") and contains("You can\u0027t talk to the user") and contains("The orchestrator\u0027s brief is the user\u0027s OK") and contains("Skip the `Size:` label and the team/refuter requirement")'
+check "subagent-start leaves out the orchestrator-only sections" \
+  '.hookSpecificOutput.additionalContext | (contains("## Match the process") or contains("## 1. Understand") or contains("## 2. Plan") or contains("## 7. Hand off") or contains("## Subagents") or contains("# How to work with me")) | not'
 out=$(cat "$ROOT/hooks/hooks.json")
 check "hooks.json registers SubagentStart" '.hooks.SubagentStart[0].hooks[0].command | contains("subagent-start")'
 for f in RULES.md skills/plan/SKILL.md; do
@@ -122,14 +129,60 @@ rm -rf "$tmp"
 
 out=$(cat "$ROOT/.claude-plugin/plugin.json")
 check "claude manifest lists claude-agents" '[.agents[]] | sort == ["./claude-agents/builder.md","./claude-agents/debugger.md","./claude-agents/refuter.md","./claude-agents/researcher.md","./claude-agents/scout.md"]'
-check "claude manifest version 0.4.1" '.version == "0.4.1"'
+ver=$(jq -r '.version // empty' "$ROOT/.claude-plugin/plugin.json" 2>/dev/null)
+[[ $ver =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; ok_or_fail "claude manifest has a semver version ($ver)" $?
 out=$(cat "$ROOT/.claude-plugin/marketplace.json")
-check "marketplace version 0.4.1" '.plugins[0].version == "0.4.1"'
+check "marketplace duty-framework version matches the claude manifest" ".plugins[0].name == \"duty-framework\" and .plugins[0].version == \"$ver\" and (\"$ver\" != \"\")"
 tf_version=$(jq -r .version "$ROOT/plugins/duty-terraform/.claude-plugin/plugin.json" 2>/dev/null)
 check "marketplace lists duty-terraform at the add-on's manifest version" \
   ".plugins[1].name == \"duty-terraform\" and .plugins[1].source == \"./plugins/duty-terraform\" and (.plugins[1].version == \"$tf_version\") and (\"$tf_version\" != \"\")"
+out=$(cat "$ROOT/plugins/duty-terraform/.plugin/plugin.json" 2>/dev/null)
+check "duty-terraform copilot manifest version matches the claude manifest" ".version == \"$tf_version\" and (\"$tf_version\" != \"\")"
 out=$(cat "$ROOT/.plugin/plugin.json" 2>/dev/null)
-check "copilot manifest points at copilot-agents" '.name == "duty-framework" and .agents == "./copilot-agents" and .version == "0.4.1"'
+check "copilot manifest points at copilot-agents, same version" ".name == \"duty-framework\" and .agents == \"./copilot-agents\" and .version == \"$ver\" and (\"$ver\" != \"\")"
+
+# scripts/bump, only ever against a copy (DUTY_ROOT)
+BT=$(mktemp -d)
+mkdir -p "$BT/.claude-plugin" "$BT/.plugin" "$BT/plugins/duty-terraform/.claude-plugin" "$BT/plugins/duty-terraform/.plugin"
+for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json; do
+  cp "$ROOT/$f" "$BT/$f"
+done
+bsum() { (cd "$BT" && cat .claude-plugin/plugin.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json | cksum); }
+jv() { jq -r "$2" "$BT/$1"; }
+before=$(bsum)
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+chmod 640 "$BT/.claude-plugin/plugin.json" "$BT/.claude-plugin/marketplace.json" "$BT/plugins/duty-terraform/.claude-plugin/plugin.json"
+chmod 664 "$BT/plugins/duty-terraform/.plugin/plugin.json"
+tf_before=$(jv plugins/duty-terraform/.claude-plugin/plugin.json .version)
+out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" duty-terraform 7.8.9 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(jv plugins/duty-terraform/.claude-plugin/plugin.json .version)" = 7.8.9 ] \
+  && [ "$(jv plugins/duty-terraform/.plugin/plugin.json .version)" = 7.8.9 ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-terraform") | .version')" = 7.8.9 ]
+ok_or_fail "bump duty-terraform sets its manifests and marketplace entry" $?
+[ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-framework") | .version')" = "$ver" ] \
+  && [ "$(jv .claude-plugin/plugin.json .version)" = "$ver" ] && [ "$(jv .plugin/plugin.json .version)" = "$ver" ]
+ok_or_fail "bump duty-terraform leaves duty-framework untouched" $?
+printf '%s' "$out" | grep -q '7.8.9' && printf '%s' "$out" | grep -q "$tf_before"
+ok_or_fail "bump prints what it changed (old and new version)" $?
+[ "$(mode "$BT/.claude-plugin/marketplace.json")" = 640 ] && [ "$(mode "$BT/plugins/duty-terraform/.claude-plugin/plugin.json")" = 640 ] \
+  && [ "$(mode "$BT/plugins/duty-terraform/.plugin/plugin.json")" = 664 ]
+ok_or_fail "bump keeps the manifests' file mode (not mktemp's 0600)" $?
+out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" duty-framework 3.2.1 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(jv .claude-plugin/plugin.json .version)" = 3.2.1 ] && [ "$(jv .plugin/plugin.json .version)" = 3.2.1 ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-framework") | .version')" = 3.2.1 ] \
+  && [ "$(jv plugins/duty-terraform/.claude-plugin/plugin.json .version)" = 7.8.9 ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-terraform") | .version')" = 7.8.9 ]
+ok_or_fail "bump duty-framework sets its three files, not the add-on" $?
+jq -e . "$BT/.claude-plugin/marketplace.json" "$BT/.claude-plugin/plugin.json" "$BT/.plugin/plugin.json" >/dev/null 2>&1
+ok_or_fail "bump leaves valid JSON" $?
+after=$(bsum)
+for args in "duty-framework 1.2" "duty-framework v1.2.3" "duty-framework 1.2.3.4" "duty-framework" "other-plugin 1.2.3" "" "duty-framework 1.2.3 extra"; do
+  # shellcheck disable=SC2086
+  out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" $args 2>&1 >/dev/null); rc=$?
+  [ $rc -eq 2 ] && printf '%s' "$out" | grep -qi usage && [ "$(bsum)" = "$after" ]
+  ok_or_fail "bump rejects bad args with usage and exit 2, changing nothing: '$args'" $?
+done
+rm -rf "$BT"
 
 # team skill: no fixed models, knows about personal agents
 ! grep -qE '^\| `[a-z]+` \| (haiku|sonnet|opus) \|' "$ROOT/skills/team/SKILL.md"
@@ -225,6 +278,10 @@ grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q refuter
 ok_or_fail "RULES.md medium tasks get a refuter review" $?
 grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q 'wait for my OK'
 ok_or_fail "RULES.md medium tasks wait for my OK" $?
+has RULES.md 'one short message with what changes, which files and how to verify it; wait for my OK (one OK covers design and plan), then do it'
+ok_or_fail "RULES.md medium: one short message, one OK covers design and plan" $?
+has RULES.md '- Steps 1–2 below are the full process for large tasks; for medium, the short plan above replaces them.'
+ok_or_fail "RULES.md: steps 1-2 are for large tasks, medium uses the short plan" $?
 has RULES.md 'Answering a clarifying question is not an OK'
 ok_or_fail "RULES.md: a clarifying-question answer is not an OK" $?
 grep -E '^ *- Medium:' "$ROOT/skills/design/SKILL.md" | grep -q 'wait for OK' && has skills/design/SKILL.md 'not an OK'
@@ -278,8 +335,9 @@ META() { echo '{"type":"user","isMeta":true,"message":{"content":[{"type":"text"
 TR()   { echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}'; }
 fx()   { f="$G/$1.jsonl"; shift; printf '%s\n' "$@" > "$f"; }
 gate() { # fixture, last_assistant_message, stop_hook_active
-  out=$(jq -cn --arg p "$G/$1.jsonl" --arg m "${2:-}" --argjson a "${3:-false}" \
-    '{transcript_path:$p,last_assistant_message:$m,stop_hook_active:$a}' | CLAUDE_PLUGIN_ROOT="$ROOT" "$ROOT/hooks/stop-gate" 2>&1); rc=$?
+  out=$(jq -cn --arg p "$G/$1.jsonl" --arg m "${2:-}" --argjson a "${3:-false}" --arg s "${GSESS:-}" \
+    '{transcript_path:$p,last_assistant_message:$m,stop_hook_active:$a} + (if $s == "" then {} else {session_id:$s} end)' \
+    | env -u DUTY_DEBUG CLAUDE_PLUGIN_DATA="${GDATA:-$G/nodata}" CLAUDE_PLUGIN_ROOT="$ROOT" "$ROOT/hooks/stop-gate" 2>&1); rc=$?
 }
 blocks() { # name, fixture, [extra jq], [last msg], [stop_hook_active]
   gate "$2" "${4:-}" "${5:-false}"
@@ -365,6 +423,35 @@ fx r9 "$(txt 'Size: medium')" "$(tool NotebookEdit '{"notebook_path":"/x/n.ipynb
 blocks "NotebookEdit with notebook_path counts as edit" r9
 fx r10 "$(txt 'Size: medium')" "$(tool NotebookEdit '{"notebook_path":"/home/u/.claude/n.ipynb"}')"
 allows "NotebookEdit under /.claude/ doesn't count" r10
+fx r11 "$(txt 'Size: medium')" "$(W /home/u/proj/.copilot/agents/x.md)"
+blocks "Write under /.copilot/ counts as edit" r11
+for l in '{"type":7}' '{"type":["x"]}'; do
+  fx r12 "$(txt 'Size: medium')" "$l" "$(W)"; blocks "line with non-string type doesn't switch the gate off: $l" r12
+done
+# resuming a refuter with SendMessage counts as a review: matched by the agentId from its result or its name
+RF()   { jq -cn --arg id "$1" --arg s "${2:-duty-refuter}" --arg n "${3:-}" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Agent",input:({subagent_type:$s} + (if $n == "" then {} else {name:$n} end))}]}}'; }
+SM()   { tool SendMessage "{\"to\":\"$1\",\"message\":\"re-check\"}"; }
+fx t1 "$(txt 'Size: medium')" "$(RF r1)" "$(LR r1 a1)" "$(W)" "$(SM a1)"
+allows "SendMessage to a refuter's agentId after the last edit" t1
+fx t2 "$(txt 'Size: medium')" "$(RF r1)" "$(LR r1 a1)" "$(W)" "$(SM a9)"
+blocks "SendMessage to another agentId doesn't count" t2
+fx t3 "$(txt 'Size: medium')" "$(RF r1 duty-refuter rev)" "$(W)" "$(SM rev)"
+allows "SendMessage to a refuter's name after the last edit" t3
+fx t4 "$(txt 'Size: medium')" "$(RF b1 duty-builder bob)" "$(LR b1 a1)" "$(W)" "$(SM a1)" "$(SM bob)"
+blocks "SendMessage to a builder doesn't count" t4
+fx t5 "$(txt 'Size: medium')" "$(RF r1)" "$(LR r1 a1)" "$(SM a1)" "$(W)"
+blocks "SendMessage to a refuter before the last edit doesn't count" t5
+# the agentId trailer comes last; an id quoted in the agent's report doesn't count
+LRT()  { jq -cn --arg id "$1" --arg t "$2" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:[{type:"text",text:$t}]}]}}'; }
+fx t6 "$(txt 'Size: medium')" "$(RF b1 duty-builder)" "$(LR b1 bld1)" "$(RF r1)" "$(LRT r1 $'FINDINGS: builder agentId: bld1 left a bug\nagentId: ref1')" "$(W)" "$(SM bld1)"
+blocks "SendMessage to an agentId quoted in a refuter report doesn't count" t6
+fx t7 "$(txt 'Size: medium')" "$(RF r1)" "$(LRT r1 $'CONFIRMED; checked agentId: zz9\nagentId: ref1')" "$(W)" "$(SM ref1)"
+allows "SendMessage to the refuter's trailer agentId counts" t7
+# a refuter result without an agentId trailer gives no ref: a SendMessage without (or with null) to doesn't match it
+for to in '' ',"to":null'; do
+  fx t8 "$(txt 'Size: medium')" "$(RF r1)" "$(LRT r1 'Agent interrupted by user')" "$(W)" "$(tool SendMessage "{\"message\":\"re-check\"$to}")"
+  blocks "SendMessage without a to after a refuter without agentId doesn't count${to:+ (to null)}" t8
+done
 
 # turns: a label counts only before the first edit of its turn
 fx s1 "$(W)" "$(txt 'Size: medium — done')"
@@ -382,11 +469,478 @@ blocks "tool_result entry is no turn boundary" s6
 for l in 'Size: small/medium/large/quick' 'Size: small | medium' 'Size: small, medium' '**Size:** small|medium'; do
   fx s7 "$(txt 'Size: medium')" "$(PR next)" "$(txt "$l")" "$(W)"; blocks "not a label: $l" s7
 done
+
+# Copilot CLI: transcriptPath points at its events.jsonl; subagent events carry agentId or data.parentToolCallId
+CT()   { jq -cn --arg t "$1" '{type:"assistant.message",data:{content:$t,toolRequests:[]}}'; }
+CU()   { jq -cn --arg t "$1" '{type:"user.message",data:{content:$t}}'; }
+CTOOL() { jq -cn --arg n "$1" --argjson a "$2" --arg id "${3:-c1}" '{type:"tool.execution_start",data:{toolCallId:$id,toolName:$n,arguments:$a}}'; }
+CE()   { CTOOL "${2:-edit}" "{\"path\":\"${1:-/x/a.md}\"}"; }
+CAG()  { CTOOL task "{\"agent_type\":\"$1\",\"prompt\":\"p\"${3:+,\"mode\":\"$3\"}}" "${2:-c1}"; }
+CTEAM() { CTOOL skill '{"skill":"team"}'; }
+CSUB() { printf '%s' "$1" | jq -c '.agentId = "s1"'; }   # wraps an event as a subagent's
+COLD() { printf '%s' "$1" | jq -c '.data.parentToolCallId = "c1"'; }   # older subagent marker
+CDONE() { jq -cn --arg t "subagent.${2:-completed}" --arg id "$1" '{type:$t,agentId:"s1",data:{toolCallId:$id}}'; }
+cgate() { # fixture, stop_hook_active
+  out=$(jq -cn --arg p "$G/$1.jsonl" --argjson a "${2:-false}" '{transcriptPath:$p,stop_hook_active:$a}' \
+    | CLAUDE_PLUGIN_ROOT="$ROOT" COPILOT_CLI=1 "$ROOT/hooks/stop-gate" 2>&1); rc=$?
+}
+cblocks() { # name, fixture, [extra jq]
+  cgate "$2"; [ $rc -eq 0 ] || out=''
+  check "stop-gate copilot blocks: $1" ".decision == \"block\" and (.reason | startswith(\"duty-framework:\")) and (${3:-true})"
+}
+callows() { # name, fixture
+  cgate "$2"
+  [ $rc -eq 0 ] && { [ -z "$out" ] || printf '%s' "$out" | jq -e '(.decision // null) == null' >/dev/null 2>&1; }
+  ok_or_fail "stop-gate copilot allows: $1" $?
+}
+fx ca "$(CU go)" "$(CT 'Size: medium')" "$(CE)"
+cblocks "medium, edit, no refuter" ca '.reason | contains("refuter") and (contains("team") | not)'
+fx cb "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CAG duty-framework:refuter)"
+callows "medium with refuter" cb
+fx cc "$(CU go)" "$(CT 'Size: large')" "$(CE)" "$(CAG duty-framework:refuter)"
+cblocks "large without team skill" cc '.reason | contains("team")'
+fx cd "$(CU go)" "$(CT 'Size: large')" "$(CTEAM)" "$(CE)" "$(CAG duty-framework:refuter)"
+callows "large with team and refuter" cd
+fx ce "$(CU go)" "$(CT 'Size: medium')" "$(CE /x/b.md create)"
+cblocks "create counts as edit" ce
+fx cf "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:builder)"
+cblocks "builder counts as edit" cf
+fx cg "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:scout)" "$(CSUB "$(CE)")" "$(COLD "$(CE)")"
+callows "a subagent's own edits don't count as the main agent's" cg
+fx ch "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CSUB "$(CU brief)")" "$(CSUB "$(CT 'Size: small')")"
+cblocks "subagent prompt is no turn boundary, subagent text no label" ch
+fx ci "$(CU go)" "$(CT 'Size: medium')" "$(CU next)" "$(CE)"
+cblocks "label from an earlier turn applies" ci
+fx cj "$(CU go)" "$(CE)" "$(CT 'Size: medium — done')"
+callows "label after an edit in the same turn is ignored" cj
+fx ck "$(CU go)" "$(CT 'Size: medium')" "$(CE /home/u/.copilot/session-state/x/plan.md)"
+callows "edits under /.copilot/ don't count" ck
+fx cl "$(CU go)" "$(CT 'Size: small')" "$(CE)"
+callows "small" cl
+fx cm "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:builder b1 background)"
+callows "background builder still running" cm
+fx cn "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:builder b1 background)" "$(CDONE b1)"
+cblocks "background builder completed, no refuter" cn
+fx co "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:builder b1 background)" "$(CDONE b1 failed)"
+cblocks "background builder failed counts as reported back" co
+fx cp "$(CU go)" "$(CT 'Size: medium')" "$(CAG duty-framework:builder b1 background)" "$(CDONE b2)"
+callows "completion of another subagent doesn't count" cp
+# Copilot hands the block reason back as a user.message: no turn boundary, so a new label after it doesn't count
+CBLK() { CU 'duty-framework: Size: medium task with edits but no refuter review after the last edit. Run a refuter subagent on the final changes (send back findings, max 2 rounds), then hand off.'; }
+fx cq "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CBLK)" "$(CT 'Size: medium — reviewed it myself')"
+cblocks "re-label after the block message doesn't reset the gate" cq
+fx cr "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CBLK)" "$(CT 'Size: small')"
+cblocks "Size: small after the block message doesn't reset the gate" cr
+fx cs "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CBLK)" "$(CAG duty-framework:refuter)"
+callows "refuter after the block message" cs
+fx ct "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '{"input":"*** Begin Patch\n*** Update File: /x/a\n"}')"
+cblocks "apply_patch counts as edit" ct
+fx cu "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '{"input":"*** Begin Patch\n*** Update File: /home/u/.copilot/session-state/x/plan.md\n"}')"
+callows "apply_patch under /.copilot/ doesn't count" cu
+fx cv "$(CU go)" "$(CT 'Size: medium')" "$(CE)" '{"type":"weird","data":"str"}'
+cblocks "event with non-object data doesn't switch the gate off" cv
+# apply_patch: only the *** Add/Update/Delete File: lines name files; arguments may be {input} or a raw string
+PATCH='*** Begin Patch\n*** Update File: /x/README.md\n@@\n- see ~/.copilot/settings.json\n+ see ~/.copilot/settings.json\n*** End Patch\n'
+fx cw1 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch "{\"input\":\"$PATCH\"}")"
+cblocks "apply_patch that mentions /.copilot/ in its text counts as edit" cw1
+fx cw2 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch "\"$PATCH\"")"
+cblocks "apply_patch with a raw string argument" cw2
+fx cw3 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '{"input":"*** Begin Patch\n*** Add File: /home/u/.copilot/a.md\n+x\n*** Update File: /x/b.md\n*** End Patch\n"}')"
+cblocks "apply_patch touching a file outside /.copilot/ counts" cw3
+fx cw4 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '"*** Begin Patch\n*** Delete File: /home/u/.copilot/a.md\n*** Update File: /home/u/.copilot/b.md\n*** End Patch\n"')"
+callows "apply_patch touching only /.copilot/ files" cw4
+fx cw6 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '{"input":"*** Begin Patch\n*** Update File: /home/u/.copilot/a.md\n*** Move to: /x/a.md\n*** End Patch\n"}')"
+cblocks "apply_patch moving a file out of /.copilot/ counts" cw6
+fx cw5 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '{"input":"/home/u/.copilot/x"}')"
+cblocks "apply_patch without file lines counts as edit" cw5
+fx cx "$(CU go)" "$(CT 'Size: medium')" "$(CE /home/u/proj/.claude/x.md)"
+cblocks "edit under /.claude/ counts in Copilot" cx
+fx cy1 '{"type":7}' "$(CU go)" "$(CT 'Size: medium')" "$(CE)"
+cblocks "line with non-string type before the first message" cy1
+fx cy2 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL edit '"oops"')"
+cblocks "edit with non-object arguments counts as edit" cy2
+fx cy3 "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CTOOL task '"oops"')"
+cblocks "task with non-object arguments doesn't switch the gate off" cy3
+fx cy4 "$(CU go)" "$(CT 'Size: medium')" "$(CE)" "$(CTOOL task '{"agent_type":7}' c2)"
+cblocks "task with non-string agent_type doesn't switch the gate off" cy4
+fx cy5 "$(CU go)" '{"type":"assistant.message","data":{"content":7}}' "$(CT 'Size: medium')" "$(CE)"
+cblocks "assistant message with non-string content doesn't switch the gate off" cy5
+fx cw7 "$(CU go)" "$(CT 'Size: medium')" "$(CTOOL apply_patch '"*** Begin Patch\n*** Update File: /x/.copilot/a\n  *** Update File: /src/b\n*** End Patch\n"')"
+cblocks "apply_patch with an indented file line" cw7
+# Bash edits: edit-track records the ids of Bash calls that changed the tree; stop-gate counts those as edits
+GD="$G/data"
+TB() { jq -cn --arg id "$1" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:"sed -i s/a/b/ f"}}]}}'; }
+bashedits() { # session, ids...
+  local s="$1"; shift; mkdir -p "$GD/sessions/$s"; printf '%s\n' "$@" > "$GD/sessions/$s/bash-edits"
+}
+bashedits sg1 X1
+fx bx1 "$(txt 'Size: medium')" "$(TB X1)"
+GSESS=sg1 GDATA=$GD blocks "medium, Bash call listed in bash-edits, no refuter" bx1 '.reason | contains("refuter")'
+fx bx2 "$(txt 'Size: medium')" "$(TB X1)" "$(AG duty-framework:refuter)"
+GSESS=sg1 GDATA=$GD; allows "medium, Bash edit then refuter" bx2
+fx bx3 "$(txt 'Size: medium')" "$(TB X1)" "$(AG duty-framework:refuter)" "$(TB Y1)"
+GSESS=sg1 GDATA=$GD; allows "medium, Bash call not in bash-edits after the refuter" bx3
+fx bx4 "$(txt 'Size: medium')" "$(TB Y1)"
+GSESS=sg1 GDATA=$GD; allows "medium, Bash call not in bash-edits is no edit" bx4
+GSESS=sg-none GDATA=$GD; allows "medium, Bash id listed but session has no bash-edits" bx1
+GSESS=sg1 GDATA=$G/other; allows "medium, bash-edits in another data dir doesn't count" bx1
+bashedits sgodd X1
+GSESS='sg/../odd' GDATA=$GD blocks "medium, session id sanitized to [A-Za-z0-9_-]" bx1 true
+unset GSESS GDATA
+# DUTY_DEBUG=1 appends one line per invocation to <data>/stop-gate.log; otherwise nothing is written
+dbg() { # fixture, session, data dir, env...
+  local f="$1" s="$2" d="$3"; shift 3
+  out=$(jq -cn --arg p "$G/$f.jsonl" --arg s "$s" '{transcript_path:$p,session_id:$s}' \
+    | env -u DUTY_DEBUG CLAUDE_PLUGIN_DATA="$d" CLAUDE_PLUGIN_ROOT="$ROOT" "$@" "$ROOT/hooks/stop-gate" 2>&1); rc=$?
+}
+dbg bx1 sg1 "$G/dbg0"
+[ $rc -eq 0 ] && [ ! -e "$G/dbg0" ]; ok_or_fail "stop-gate without DUTY_DEBUG writes no log" $?
+dbg bx1 sg1 "$GD" DUTY_DEBUG=1
+check "stop-gate DUTY_DEBUG=1 still blocks on stdout" '.decision == "block"'
+dbg bx2 sg1 "$GD" DUTY_DEBUG=1
+[ $rc -eq 0 ] && [ -z "$out" ]; ok_or_fail "stop-gate DUTY_DEBUG=1 allow leaves stdout empty" $?
+[ "$(wc -l < "$GD/stop-gate.log" 2>/dev/null)" = 2 ] && sed -n 1p "$GD/stop-gate.log" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T.* sg1 block: ' \
+  && sed -n 2p "$GD/stop-gate.log" | grep -Eq ' sg1 allow'
+ok_or_fail "stop-gate DUTY_DEBUG=1 logs one line per run: timestamp, session, block/allow" $?
+mkdir -p "$G/ro/sessions/sg1"; printf 'X1\n' > "$G/ro/sessions/sg1/bash-edits"; chmod 500 "$G/ro"
+dbg bx1 sg1 "$G/ro" DUTY_DEBUG=1
+chmod 700 "$G/ro"
+[ $rc -eq 0 ]; ok_or_fail "stop-gate DUTY_DEBUG=1 with unwritable log dir doesn't fail" $?
+check "stop-gate DUTY_DEBUG=1 with unwritable log dir still blocks" '.decision == "block"'
+# every exit path logs once, bad input included
+printf 'not json' | env CLAUDE_PLUGIN_DATA="$G/dbg1" DUTY_DEBUG=1 "$ROOT/hooks/stop-gate" >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && [ "$(wc -l < "$G/dbg1/stop-gate.log" 2>/dev/null)" = 1 ] && grep -Eq '^[0-9]{4}-.* - allow: bad input$' "$G/dbg1/stop-gate.log"
+ok_or_fail "stop-gate DUTY_DEBUG=1 logs 'allow: bad input' on non-JSON input" $?
+printf '{}' | env CLAUDE_PLUGIN_DATA="$G/dbg2" DUTY_DEBUG=1 "$ROOT/hooks/stop-gate" >/dev/null 2>&1; rc=$?
+[ $rc -eq 0 ] && [ "$(wc -l < "$G/dbg2/stop-gate.log" 2>/dev/null)" = 1 ] && grep -q 'allow: no transcript$' "$G/dbg2/stop-gate.log"
+ok_or_fail "stop-gate DUTY_DEBUG=1 logs once on input without a transcript" $?
 rm -rf "$G"
 
+# command-guard: PreToolUse on Bash, denies git writes and apply/deploy commands (Claude Code only)
+guard() { # command, env...
+  local c="$1"; shift
+  out=$(jq -cn --arg c "$c" '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c}}' \
+    | env -u COPILOT_CLI -u DUTY_ALLOW_GIT_WRITE -u DUTY_ALLOW_APPLY CLAUDE_PLUGIN_ROOT="$ROOT" "$@" "$ROOT/hooks/command-guard" 2>&1); rc=$?
+}
+denies() { # group (git|apply), command, env...
+  local g="$1" c="$2" var; shift 2
+  [ "$g" = git ] && var=DUTY_ALLOW_GIT_WRITE || var=DUTY_ALLOW_APPLY
+  guard "$c" "$@"
+  [ $rc -eq 0 ] && [ -n "$out" ] && printf '%s' "$out" | jq -e --arg v "$var" '.hookSpecificOutput.hookEventName == "PreToolUse"
+    and .hookSpecificOutput.permissionDecision == "deny"
+    and (.hookSpecificOutput.permissionDecisionReason | startswith("duty-framework:") and contains($v))' >/dev/null 2>&1
+  ok_or_fail "command-guard denies ($g): $c${*:+ [$*]}" $?
+}
+passes() { # command, env...
+  local c="$1"; shift
+  guard "$c" "$@"
+  [ $rc -eq 0 ] && [ -z "$out" ]
+  ok_or_fail "command-guard allows: $c${*:+ [$*]}" $?
+}
+for c in 'git commit -m x' 'git push' 'git push origin main --force' 'git merge main' 'git rebase main' 'git reset --hard' \
+  'git stash' 'git stash pop' 'git cherry-pick abc' 'git revert abc' 'git checkout -- a.md' 'git restore a.md' \
+  'git switch -c x' 'git checkout -b x' 'git branch x' 'git branch -D x' 'git branch -m y' 'git tag v1' \
+  'gh pr create --fill' 'gh pr merge 1' 'git -C /x commit -m y' 'git -c user.name=a commit' '/usr/bin/git push' \
+  'sudo git push' 'env A=1 git commit' 'A=1 B=2 git commit' 'time git push' 'git status && git commit -m x' \
+  'ls; git push' 'true || git reset --hard' 'git diff | cat; git stash' $'git status\ngit commit' 'echo $(git push)' \
+  'git commit -m "fix; push"' 'DUTY_ALLOW_GIT_WRITE=1 git commit' 'git -C "dir with space" push' \
+  'git -c "user.name=A B" commit' $'git -C /x \\\n  commit -m y' 'git checkout -bfoo' 'git switch --create=foo' \
+  'git push>out' 'sudo -u root git push' 'env -u FOO git push' 'nice -n 10 git push' 'timeout 60 git push' \
+  'timeout -s KILL 60 git push' 'git -c user.email="a@b" commit -m x' 'git --git-dir="/r/.git" push' \
+  'GIT_AUTHOR_NAME="A B" git commit -m x' "FOO='x' git push" 'git -C /repo switch -c x' 'git -C /repo branch -D x' \
+  'git branch "quoted-name"'; do
+  denies git "$c"
+done
+for c in 'terraform apply' 'terraform apply -auto-approve' 'terraform destroy' 'terraform import a.b id' \
+  'terraform state rm a.b' 'terraform state mv a b' 'terraform state push f' 'terraform -chdir=infra apply' \
+  'kubectl apply -f x.yaml' 'kubectl -n prod apply -f x' 'kubectl --context c delete pod x' 'kubectl create ns x' \
+  'kubectl patch deploy x -p {}' 'kubectl replace -f x' 'kubectl scale deploy x --replicas=0' \
+  'kubectl rollout restart deploy/x' 'kubectl apply --dry-run=none -f x' 'helm install a ./c' 'helm -n x upgrade a ./c' \
+  'kubectl apply -f x.yaml --dry-run=false' 'helm upgrade x y --dry-run=false' 'kubectl apply -f x --dry-run=none' \
+  'helm uninstall a' 'helm rollback a 1' 'terraform plan && terraform apply' 'DUTY_ALLOW_APPLY=1 terraform apply' \
+  'kubectl -n "prod" apply -f x' "helm -n 'ns' upgrade a ./c" $'kubectl \\\n -n prod apply -f x' 'kubectl -v 6 apply -f x' \
+  'kubectl --namespace="prod" apply -f x' 'helm --kube-context="c" upgrade r ch'; do
+  denies apply "$c"
+done
+for c in 'git status' 'git diff HEAD' 'git log --oneline --grep=commit' 'git blame a.md' 'git show HEAD' 'git branch' \
+  'git branch -a' 'git branch --list' 'git tag' 'git tag -l' 'git stash list' 'git -C /x status' 'git commit --dry-run' \
+  'git push --dry-run' 'gh pr view 1' 'gh pr list' 'terraform plan -out=p' 'terraform validate' 'terraform fmt -recursive' \
+  'terraform init -backend=false' 'terraform state list' 'terraform state show a.b' 'kubectl get pods -n x' \
+  'kubectl -n prod describe pod x' 'kubectl diff -f x' 'kubectl apply --dry-run=client -f x' 'kubectl apply -f x --dry-run=client' 'kubectl apply -f x --dry-run=server' 'kubectl rollout status deploy/x' \
+  'helm template a ./c' 'helm upgrade --dry-run a ./c' 'helm list' 'echo "git commit"' "grep -rn 'terraform apply' ." \
+  'rg "kubectl delete" docs' 'ls -la' 'cat README.md | grep git' 'bash tests/test-hooks.sh' 'git tag -v v1' \
+  'git tag --verify v1' 'terraform state mv -dry-run a b' 'git log > out.txt' 'timeout 60 git status' \
+  'git branch --format="%(refname)"' 'git branch --sort "-committerdate"' 'git tag --sort "-v:refname"' \
+  'git -C /repo switch main' 'git -C /repo branch' 'git -c color.ui=never branch'; do
+  passes "$c"
+done
+# more apply/deploy tools: tofu, terragrunt, pulumi, package/image publishes, gh release, az, aws
+for c in 'tofu apply' 'tofu destroy -auto-approve' 'tofu import a.b id' 'tofu state rm a.b' 'tofu state mv a b' 'tofu state push f' \
+  'tofu -chdir=infra apply' 'terragrunt apply' 'terragrunt destroy' 'terragrunt import a.b id' 'terragrunt state rm a.b' \
+  'terragrunt run-all apply' 'terragrunt run-all destroy' 'terragrunt run-all --terragrunt-non-interactive apply' \
+  'terragrunt run --all apply' 'terragrunt run --all -- destroy' 'terragrunt --terragrunt-working-dir infra apply' \
+  'pulumi up' 'pulumi up --yes' 'pulumi destroy' 'pulumi update' 'pulumi -C infra up' 'pulumi --stack prod destroy' \
+  'npm publish' 'pnpm publish' 'yarn publish' 'yarn npm publish' 'npm publish --access public' \
+  'docker push img:1' 'docker push registry.example.com/a/b:tag' \
+  'gh release create v1 --notes x' 'gh -R o/r release create v1' \
+  'az group delete -n x --yes' 'az vm create -g rg -n vm --image x' 'az vm update -g rg -n vm' 'az webapp restart -n w -g rg' \
+  'az vm stop -n vm -g rg' 'az vm start -n vm -g rg' 'az keyvault purge --name kv' 'az role assignment create --role r' \
+  'az account set --subscription s' 'az group lock add' 'az storage account delete -n delete -g rg' \
+  'az --subscription s group delete -n x' 'az group delete --name=x' 'az vm show -n x -g y && az vm delete -n x -g y' \
+  'aws s3 rm s3://b/k' 'aws s3 mv s3://a s3://b' 'aws s3 cp f s3://b/k' 'aws s3 sync . s3://b' 'aws s3 rb s3://b --force' \
+  'aws s3api delete-bucket --bucket b' 'aws s3api put-object --bucket b --key k' 'aws ec2 terminate-instances --instance-ids i-1' \
+  'aws iam create-user --user-name u' 'aws lambda update-function-code --function-name f' 'aws dynamodb put-item --table-name t' \
+  'aws ec2 modify-instance-attribute --instance-id i' 'aws ec2 delete-security-group --group-id g' \
+  'aws --region eu-west-1 ec2 terminate-instances --instance-ids i-1' 'aws --profile p s3 rm s3://b/k' \
+  'aws --output json --query x iam delete-user --user-name u' 'aws --endpoint-url http://localhost:4566 s3 rb s3://b' \
+  'aws sts get-caller-identity && aws s3 rm s3://b/k'; do
+  denies apply "$c"
+done
+# az: only the command words (before the first option) count; aws: more write verbs, s3 direction; terragrunt -all, docker image push, gh release
+for c in 'az vm start -g rg -n vm' 'az account set -s x' 'az group delete -n x' 'az --subscription s vm restart -n v' \
+  'aws --color on s3 rm s3://x' 'aws --cli-read-timeout 5 ec2 delete-vpc --vpc-id x' 'aws --cli-connect-timeout 5 ec2 run-instances' \
+  'aws --ca-bundle b.pem ec2 stop-instances --instance-ids i' 'aws --cli-binary-format raw-in-base64-out lambda invoke --function-name f out' \
+  'aws ec2 run-instances --image-id x' 'aws ec2 start-instances --instance-ids i' 'aws ec2 stop-instances --instance-ids i' \
+  'aws ec2 reboot-instances --instance-ids i' 'aws ec2 attach-volume --volume-id v' 'aws ec2 detach-volume --volume-id v' \
+  'aws ec2 associate-address --instance-id i' 'aws ec2 disassociate-address --association-id a' 'aws ecs register-task-definition --family f' \
+  'aws ecs deregister-task-definition --task-definition t' 'aws guardduty enable-organization-admin-account' 'aws guardduty disable-organization-admin-account' \
+  'aws ec2 create-tags --resources r' 'aws ec2 tag-resource --r x' 'aws s3api untag-resource --x y' 'aws rds restore-db-instance-from-snapshot' \
+  'aws ec2 import-image' 'aws ec2 revoke-security-group-ingress --group-id g' 'aws ec2 authorize-security-group-ingress --group-id g' \
+  'aws ssm execute-command --x y' 'aws sqs send-message --queue-url q --message-body b' 'aws cloudformation deploy --template-file t --stack-name s' \
+  'aws lambda invoke --function-name f out' 'aws sns publish --topic-arn t --message m' \
+  'aws s3 mv s3://a ./local' 'aws s3 cp ./local s3://b/k --recursive' 'aws s3 cp --recursive . s3://b' 'aws s3 sync ./dir s3://b --exclude "*.log"' \
+  'aws s3 sync s3://a s3://b' 'aws s3 cp s3://a/k s3://b/k' \
+  'terragrunt apply-all' 'terragrunt destroy-all' 'terragrunt --terragrunt-working-dir infra apply-all' \
+  'docker image push img:1' 'docker image push registry.example.com/a/b:tag' \
+  'gh release delete v1' 'gh release upload v1 a.zip' 'gh release edit v1 --notes x' 'gh -R o/r release delete v1 -y'; do
+  denies apply "$c"
+done
+for c in 'az group list' 'az account show' 'az vm show -n x -g y' 'az vm show -n delete -g rg' 'az vm show --name delete --resource-group rg' \
+  'az group show -g update' 'az vm list -o table' 'az group list --query "[?name==\x27a\x27]" -o tsv' 'az account list --output json' \
+  'az vm list --subscription create' 'az group list -l restart' 'az aks get-credentials -n c -g rg' 'az login' \
+  'aws s3 ls' 'aws s3 ls s3://delete-me' 'aws ec2 describe-instances --region eu-west-1' 'aws sts get-caller-identity' \
+  'aws s3api list-buckets' 'aws s3api get-object --bucket b --key k out' 'aws --profile delete-me s3 ls' \
+  'aws --region eu-west-1 --output json ec2 describe-instances' 'aws ec2 describe-instances --query "Reservations[]"' \
+  'aws configure set region eu-west-1' 'aws iam list-users --output text' \
+  'npm install' 'npm test' 'npm pack' 'pnpm install' 'yarn install' 'npm publish --dry-run' 'docker build .' 'docker pull img' 'docker run --rm img' \
+  'gh release list' 'gh release view v1' 'gh pr view 1' \
+  'tofu plan' 'tofu validate' 'tofu fmt' 'tofu state list' 'tofu apply --dry-run' 'terragrunt plan' 'terragrunt run-all plan' \
+  'terragrunt run --all plan' 'terragrunt hclfmt' 'pulumi preview' 'pulumi stack ls' 'pulumi up --dry-run' 'pulumi config get x' \
+  'echo "az group delete"' "grep -rn 'aws s3 rm' ." 'ls delete-bucket' \
+  'az storage blob list --container-name stop' 'az vm list --tag start' 'az monitor metrics list --metric restart' \
+  'az vm list --resource-group rg --query "[?x]"' 'az network nsg rule list -g rg --nsg-name set' \
+  'aws --color on s3 ls' 'aws --cli-read-timeout 5 ec2 describe-vpcs' 'aws s3 cp s3://b/k ./local' 'aws s3 sync s3://b ./dir' \
+  'aws s3 cp s3://b/k - --region eu-west-1' 'aws s3 sync s3://b ./dir --exclude "*.log"' 'aws s3 cp f s3://b/k --dryrun' \
+  'aws s3 rm s3://b/k --dryrun' 'aws s3 sync . s3://b --dry-run' \
+  'aws ec2 describe-tags' 'aws ec2 describe-addresses' 'aws sqs receive-message --queue-url q' 'aws s3api get-bucket-tagging --bucket b' \
+  'aws iam list-attached-user-policies --user-name u' 'aws ssm describe-instance-information' 'aws logs get-log-events --x y' \
+  'terragrunt plan-all' 'terragrunt run-all plan' 'docker image ls' 'docker image pull img' 'docker image build .' \
+  'gh release download v1' 'gh release create v1 --dry-run' 'gh release view v1'; do
+  passes "$c"
+done
+passes 'tofu apply' DUTY_ALLOW_APPLY=1
+passes 'az group delete -n x' DUTY_ALLOW_APPLY=1
+passes 'aws s3 rm s3://b/k' DUTY_ALLOW_APPLY=1
+passes 'npm publish' DUTY_ALLOW_APPLY=1
+denies apply 'pulumi up' DUTY_ALLOW_GIT_WRITE=1
+denies git 'gh pr create --fill'
+denies git 'git commit -m x' DUTY_ALLOW_APPLY=1
+passes 'git commit -m x' DUTY_ALLOW_GIT_WRITE=1
+passes 'git push' DUTY_ALLOW_GIT_WRITE=1
+denies apply 'terraform apply' DUTY_ALLOW_GIT_WRITE=1
+passes 'terraform apply' DUTY_ALLOW_APPLY=1
+passes 'kubectl delete pod x' DUTY_ALLOW_APPLY=1
+denies git 'git commit -m x' DUTY_ALLOW_GIT_WRITE=0
+passes 'git commit -m x' COPILOT_CLI=1
+out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/x","content":"git commit"}}' | CLAUDE_PLUGIN_ROOT="$ROOT" "$ROOT/hooks/command-guard" 2>&1); rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ]; ok_or_fail "command-guard ignores other tools" $?
+for bad in 'not json' '{"tool_name":"Bash","tool_input":{"command":7}}' '{"tool_name":"Bash","tool_input":"git push"}' ''; do
+  out=$(printf '%s' "$bad" | CLAUDE_PLUGIN_ROOT="$ROOT" "$ROOT/hooks/command-guard" 2>&1); rc=$?
+  [ $rc -eq 0 ] && [ -z "$out" ]; ok_or_fail "command-guard stays silent on malformed input: $bad" $?
+done
+T=$(mktemp -d)
+out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git push"}}' | PATH="$T" CLAUDE_PLUGIN_ROOT="$ROOT" /bin/bash "$ROOT/hooks/command-guard" 2>&1); rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ]; ok_or_fail "command-guard without jq stays silent" $?
+rm -rf "$T"
+# Claude Code passes hook input on a socket, where opening /dev/stdin fails (ENXIO)
+if command -v python3 >/dev/null; then
+  out=$(env -u COPILOT_CLI -u DUTY_ALLOW_GIT_WRITE python3 - "$ROOT/hooks/command-guard" <<'PY'
+import socket, subprocess, sys
+a, b = socket.socketpair()
+p = subprocess.Popen([sys.argv[1]], stdin=b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+b.close()
+a.sendall(b'{"tool_name":"Bash","tool_input":{"command":"git push"}}'); a.shutdown(socket.SHUT_WR)
+sys.stdout.write(p.communicate()[0].decode())
+PY
+)
+  check "command-guard reads its input from a socket" '.hookSpecificOutput.permissionDecision == "deny"'
+else
+  echo "skip command-guard socket input (python3 not installed)"
+fi
+out=$(cat "$ROOT/hooks/hooks.json")
+check "hooks.json registers PreToolUse command-guard on Bash" \
+  '.hooks.PreToolUse | any(.matcher == "Bash" and (.hooks[0].command | contains("command-guard")))'
+
+out=$(cat "$ROOT/hooks/hooks.json")
+check "hooks.json keeps command-guard on PreToolUse Bash when edit-track is added" \
+  '[.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command] | any(contains("command-guard"))'
+for ev in PreToolUse PostToolUse PostToolUseFailure; do
+  check "hooks.json registers $ev edit-track on Bash" \
+    ".hooks.$ev | any(.matcher == \"Bash\" and any(.hooks[]; .type == \"command\" and .command == \"\\\"\${CLAUDE_PLUGIN_ROOT}/hooks/edit-track\\\"\"))"
+done
+
+# edit-track: fingerprints the git tree around each Bash call and records the ids of calls that changed it
+ETD=$(mktemp -d); ETR=$(mktemp -d); ETN=$(mktemp -d)
+git -C "$ETR" init -q
+git -C "$ETR" config user.email t@example.com; git -C "$ETR" config user.name t
+echo one > "$ETR/a.txt"; echo two > "$ETR/b.txt"; echo three > "$ETR/c.txt"
+git -C "$ETR" add . && git -C "$ETR" commit -q -m init
+et() { # event, tool_use_id, cwd, env...
+  local ev="$1" id="$2" cwd="$3"; shift 3
+  out=$(jq -cn --arg e "$ev" --arg i "$id" --arg c "$cwd" \
+    '{hook_event_name:$e,session_id:"es1",cwd:$c,tool_name:"Bash",tool_use_id:$i,tool_input:{command:"x"}}' \
+    | env -u COPILOT_CLI CLAUDE_PLUGIN_DATA="$ETD" CLAUDE_PLUGIN_ROOT="$ROOT" "$@" "$ROOT/hooks/edit-track" 2>&1); rc=$?
+  [ $rc -eq 0 ] && [ -z "$out" ]
+}
+recorded() { grep -qx "$1" "$ETD/sessions/es1/bash-edits" 2>/dev/null; }
+et_case() { # name, expected (yes|no), id, event-after, command run between Pre and Post (in $ETR)
+  local name="$1" want="$2" id="$3" post="$4" body="$5" good=0
+  et PreToolUse "$id" "$ETR" || good=1
+  ( cd "$ETR" && eval "$body" ) >/dev/null 2>&1
+  et "$post" "$id" "$ETR" || good=1
+  if [ "$want" = yes ]; then recorded "$id" || good=1; else ! recorded "$id" || good=1; fi
+  [ -e "$ETD/sessions/es1/pre/$id" ] && good=1
+  ok_or_fail "edit-track: $name" $good
+}
+et_case "sed -i style change of a tracked file is recorded" yes t1 PostToolUse "echo changed >> a.txt"
+et_case "no change records nothing (path already in status, unchanged)" no t2 PostToolUse "git status >/dev/null; ls"
+et_case "new untracked file is recorded" yes t3 PostToolUse "echo new > new.txt"
+et_case "deleted tracked file is recorded" yes t4 PostToolUse "rm b.txt"
+et_case "git add alone is not an edit" no t5 PostToolUse "git add a.txt"
+et_case "modifying an already-modified file again is recorded" yes t6 PostToolUse "echo more >> a.txt"
+et_case "same content, later mtime on an already-modified file is not recorded" no t6b PostToolUse "touch -d '2001-02-03 04:05:06' a.txt"
+et_case "reverting a file to HEAD (path leaves status) is recorded" yes t7 PostToolUse "git show HEAD:a.txt > a.txt; git add a.txt"
+et_case "PostToolUseFailure records like PostToolUse" yes t8 PostToolUseFailure "echo x >> c.txt; false"
+et_case "PostToolUseFailure with no change records nothing" no t9 PostToolUseFailure "false"
+et_case "rename is recorded" yes t10 PostToolUse "git mv c.txt d.txt"
+et_case "git add of the untracked file alone is not an edit" no t11 PostToolUse "git add new.txt"
+# contents, not stat data or status: commits and same-content rewrites are no edits
+et_case "git commit of dirty files is not an edit" no t12 PostToolUse "git add -A; git commit -q -m dirty"
+et_case "modifying a clean tracked file is recorded" yes t13 PostToolUse "echo clean >> a.txt"
+et_case "rewriting a dirty file with identical content (cat x > x) is not recorded" no t14 PostToolUse "cp a.txt a.bak; cat a.bak > a.txt; rm a.bak"
+et_case "touching a dirty file is not recorded" no t15 PostToolUse "touch a.txt"
+et_case "reverting a dirty file to HEAD content is recorded" yes t16 PostToolUse "git show HEAD:a.txt > a.txt"
+et_case "no change on a clean tree records nothing" no t17 PostToolUse "ls"
+et_case "a file whose name has spaces is recorded" yes t18 PostToolUse "echo x > 'with space.txt'"
+et_case "a file whose name has a newline neither fails nor is recorded as a crash" no t19 PostToolUse "printf x > \"\$(printf 'a\\nb')\"; rm -f a?b"
+# Pre records which repo it looked at: Post's own cwd is not consulted
+ETB=$(mktemp -d); git -C "$ETB" init -q; echo b > "$ETB/b.txt"
+git -C "$ETB" config user.email t@example.com; git -C "$ETB" config user.name t; git -C "$ETB" add . && git -C "$ETB" commit -q -m init
+echo dirtyB >> "$ETB/b.txt"
+et PreToolUse x1 "$ETR"; et PostToolUse x1 "$ETB"
+! recorded x1; ok_or_fail "edit-track: Pre in repo A, Post cwd in dirty repo B, no edits: not recorded" $?
+et PreToolUse x2 "$ETR"; echo more >> "$ETR/a.txt"; et PostToolUse x2 "$ETB"
+recorded x2; ok_or_fail "edit-track: edit in repo A with Post cwd in repo B is recorded" $?
+rm -rf "$ETB"
+# a path listed twice in `git status` (staged delete + untracked, rename origin + new file) must not look like an edit
+ETR_MAIN=$ETR
+ETR=$(mktemp -d); git -C "$ETR" init -q
+git -C "$ETR" config user.email t@example.com; git -C "$ETR" config user.name t
+echo one > "$ETR/f"; echo two > "$ETR/a"; git -C "$ETR" add . && git -C "$ETR" commit -q -m init
+git -C "$ETR" rm -q --cached f
+et_case "path twice in status (git rm --cached, file kept): no-op is not recorded" no d1 PostToolUse "true"
+et_case "path twice in status (git rm --cached, file kept): change to the file is recorded" yes d2 PostToolUse "echo more >> f"
+rm -rf "$ETR"; ETR=$(mktemp -d); git -C "$ETR" init -q
+git -C "$ETR" config user.email t@example.com; git -C "$ETR" config user.name t
+echo one > "$ETR/f"; echo two > "$ETR/a"; git -C "$ETR" add . && git -C "$ETR" commit -q -m init
+git -C "$ETR" mv a b; echo new > "$ETR/a"
+et_case "rename origin plus new file at the old name: no-op is not recorded" no d3 PostToolUse "true"
+et_case "rename origin plus new file at the old name: change to the new file is recorded" yes d4 PostToolUse "echo more >> a"
+rm -rf "$ETR"; ETR=$ETR_MAIN
+# stale pre files (no Post ever came, e.g. a denied call) are removed on the next Pre; fresh ones stay
+mkdir -p "$ETD/sessions/es1/pre"; touch "$ETD/sessions/es1/pre/fresh"; touch -d '3 days ago' "$ETD/sessions/es1/pre/stale"
+et PreToolUse leak1 "$ETR"
+[ ! -e "$ETD/sessions/es1/pre/stale" ] && [ -e "$ETD/sessions/es1/pre/fresh" ] && [ -e "$ETD/sessions/es1/pre/leak1" ]
+ok_or_fail "edit-track: Pre deletes pre files older than a day, keeps newer ones" $?
+rm -f "$ETD/sessions/es1/pre/fresh" "$ETD/sessions/es1/pre/leak1"
+et PostToolUse nopre "$ETR"
+[ $? -eq 0 ] && ! recorded nopre; ok_or_fail "edit-track: Post without a Pre file records nothing" $?
+et PreToolUse "../evil" "$ETR"; et PostToolUse "../evil" "$ETR"
+[ ! -e "$ETD/sessions/es1/pre/..evil" ] && [ -z "$(ls "$ETD/sessions/es1/pre" 2>/dev/null)" ]; ok_or_fail "edit-track: tool_use_id sanitized, Pre file removed" $?
+# not a git repo, Copilot, malformed input: silent, nothing written
+ETD0=$ETD; ETD=$ETN
+mkdir -p "$ETN/plain"
+et PreToolUse n1 "$ETN/plain"; et PostToolUse n1 "$ETN/plain"
+[ $? -eq 0 ] && [ ! -e "$ETN/sessions" ] && [ -z "$(ls -A "$ETN" | grep -v '^plain$')" ]; ok_or_fail "edit-track: non-git cwd writes nothing, silent exit 0" $?
+et PreToolUse n2 "$ETR" COPILOT_CLI=1
+[ $? -eq 0 ] && [ ! -e "$ETN/sessions" ]; ok_or_fail "edit-track: COPILOT_CLI=1 writes nothing" $?
+for bad in 'not json' '' '7' '{}' '{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/nonexistent/x","tool_use_id":"i"}' \
+  '{"hook_event_name":"PreToolUse","session_id":"///","cwd":"'"$ETR"'","tool_use_id":"i"}' \
+  '{"hook_event_name":"PreToolUse","session_id":"s","cwd":"'"$ETR"'"}' '{"hook_event_name":"PreToolUse","session_id":7,"cwd":"'"$ETR"'","tool_use_id":[]}'; do
+  out=$(printf '%s' "$bad" | env -u COPILOT_CLI CLAUDE_PLUGIN_DATA="$ETN" "$ROOT/hooks/edit-track" 2>&1); rc=$?
+  [ $rc -eq 0 ] && [ -z "$out" ] && [ ! -e "$ETN/sessions" ]; ok_or_fail "edit-track stays silent and writes nothing on malformed input: $bad" $?
+done
+ETD=$ETD0
+T=$(mktemp -d)
+out=$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"s","cwd":"'"$ETR"'","tool_use_id":"i"}' | PATH="$T" CLAUDE_PLUGIN_DATA="$ETN" /bin/bash "$ROOT/hooks/edit-track" 2>&1); rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ] && [ ! -e "$ETN/sessions" ]; ok_or_fail "edit-track without jq stays silent" $?
+rm -rf "$T" "$ETD" "$ETR" "$ETN"
+# end to end: edit-track Pre/Post, then stop-gate reads what it recorded
+EE=$(mktemp -d); EED=$(mktemp -d); EER="$EE/repo"; mkdir "$EER"
+git -C "$EER" init -q; git -C "$EER" config user.email t@example.com; git -C "$EER" config user.name t
+echo one > "$EER/f.txt"; git -C "$EER" add . && git -C "$EER" commit -q -m init
+eehook() { # event
+  jq -cn --arg e "$1" --arg c "$EER" '{hook_event_name:$e,session_id:"S",cwd:$c,tool_name:"Bash",tool_use_id:"X",tool_input:{command:"sed -i s/one/two/ f.txt"}}' \
+    | env -u COPILOT_CLI CLAUDE_PLUGIN_DATA="$EED" "$ROOT/hooks/edit-track" >/dev/null 2>&1
+}
+eehook PreToolUse; sed -i.bak 's/one/two/' "$EER/f.txt" && rm -f "$EER/f.txt.bak"; eehook PostToolUse
+eetx() { jq -cn --arg id X '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:"sed -i s/one/two/ f.txt"}}]}}'; }
+{ txt 'Size: medium'; eetx; } > "$EE/t.jsonl"
+eestop() { jq -cn --arg p "$EE/t.jsonl" '{transcript_path:$p,session_id:"S"}' | env CLAUDE_PLUGIN_DATA="$EED" "$ROOT/hooks/stop-gate" 2>&1; }
+out=$(eestop)
+check "end to end: Bash edit seen by edit-track blocks the stop gate" '.decision == "block" and (.reason | contains("refuter"))'
+AG duty-framework:refuter >> "$EE/t.jsonl"
+out=$(eestop)
+[ -z "$out" ]; ok_or_fail "end to end: a refuter call after the Bash edit lets the stop gate allow" $?
+rm -rf "$EE" "$EED"
+
+# state dir defaults to ${TMPDIR:-/tmp}/duty-framework without CLAUDE_PLUGIN_DATA
+ETT=$(mktemp -d); ETR2=$(mktemp -d); git -C "$ETR2" init -q; echo a > "$ETR2/f"
+for ev in PreToolUse PostToolUse; do
+  [ $ev = PostToolUse ] && echo b >> "$ETR2/f"
+  printf '{"hook_event_name":"%s","session_id":"d1","cwd":"%s","tool_use_id":"k1"}' "$ev" "$ETR2" \
+    | env -u COPILOT_CLI -u CLAUDE_PLUGIN_DATA TMPDIR="$ETT" "$ROOT/hooks/edit-track" >/dev/null 2>&1
+done
+grep -qx k1 "$ETT/duty-framework/sessions/d1/bash-edits" 2>/dev/null; ok_or_fail "edit-track default state dir is \$TMPDIR/duty-framework/sessions/<id>" $?
+rm -rf "$ETT" "$ETR2"
+
+# newer `claude plugin validate` appends an advisory plugin-directory section whose warnings
+# (e.g. a missing icon) don't affect the result; drop it before looking for warnings
+strip_advisory() { sed -e '/^Plugin directory checks/,/^These plugin directory checks do not change the result below\.$/d' -e '/^The directory also runs a safety scan/d'; }
+ADV='Plugin directory checks for /x. The plugin directory is the catalog that plugins are submitted to.
+
+â  Found 1 plugin directory warning:
+
+  â¯ .claude-plugin/plugin.json icon: No icon (ICON_MISSING).
+
+These plugin directory checks do not change the result below.
+
+The directory also runs a safety scan and a policy review that this command does not.
+'
+okout=$(printf 'Validating marketplace manifest: /x/m.json\n\n%b\n\xe2\x9c\x94 Validation passed\n' "$ADV")
+badout=$(printf 'Validating plugin manifest: /x/p.json\n\n\xe2\x9a\xa0 Found 1 warning:\n\n  \xe2\x9d\xaf name: odd\n\n%b\n\xe2\x9c\x94 Validation passed with warnings\n' "$ADV")
+badafter=$(printf '%b\n\xe2\x9a\xa0 Found 1 warning:\n  x\n' "$ADV")
+! printf '%s\n' "$okout" | strip_advisory | grep -qi warning
+ok_or_fail "validate filter: only the advisory warning passes" $?
+printf '%s\n' "$badout" | strip_advisory | grep -qi warning
+ok_or_fail "validate filter: a manifest warning before the advisory still fails" $?
+printf '%s\n' "$badafter" | strip_advisory | grep -qi warning
+ok_or_fail "validate filter: a warning after the advisory still fails" $?
+printf '%s\n' "$okout" | grep -qi warning
+ok_or_fail "validate filter: sample really contains the advisory warning unfiltered" $?
 if command -v claude >/dev/null; then
   out=$(claude plugin validate "$ROOT" 2>&1)
-  if [ $? -eq 0 ] && ! printf '%s' "$out" | grep -qi 'warning'; then
+  if [ $? -eq 0 ] && ! printf '%s' "$out" | strip_advisory | grep -qi 'warning'; then
     echo "ok   claude plugin validate"
   else
     echo "FAIL claude plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))

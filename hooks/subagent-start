@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# Injects RULES.md into every subagent (Claude Code), which doesn't get the session-start context.
+# Injects the parts of RULES.md a subagent needs (not the whole file) into every subagent (Claude Code),
+# which doesn't get the session-start context. Sections are cut from RULES.md by heading, so it stays the single source.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/hooks/emit.sh"
+
+# Each wanted section, from its "## " heading up to the next one; a heading missing from RULES.md is skipped.
+rules=$(awk '
+  BEGIN {
+    n = split("## Git: local changes only|## Real environments: read-only|## 3. Test first|## 4. Debug systematically|## 5. Best solution, not overcomplicated|## 6. Verify before claiming done", w, "|")
+    for (i = 1; i <= n; i++) want[w[i]] = 1
+  }
+  /^## / { on = ($0 in want) }
+  on { print }
+' "$ROOT/RULES.md" 2>/dev/null) || rules=
 
 emit SubagentStart "<IMPORTANT>
 You are a subagent. These are the user's working rules; follow them for this task.
@@ -10,5 +21,5 @@ You can't talk to the user: where the rules say to ask the user or wait for thei
 The orchestrator's brief is the user's OK for the work it describes: do that work; report back only questions it leaves open.
 Skip the \`Size:\` label and the team/refuter requirement; the orchestrator handles those.
 
-$(cat "$ROOT/RULES.md")
+$rules
 </IMPORTANT>"

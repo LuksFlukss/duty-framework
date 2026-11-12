@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Claude Code Pre/PostToolUse(+Failure) hook on Bash: records the ids of Bash calls that changed the git tree,
+# so stop-gate counts them as edits (sed -i, `cat > file`). Never prints, never fails: errors fail open.
+# Pre saves the repo toplevel, HEAD and a content hash (git hash-object) for every path in `git status`.
+# Post re-hashes those paths plus the ones in status now, in that same toplevel (its own cwd is ignored), and
+# records the call if any content differs: `git add`, a commit or rewriting a file with the same bytes are no edits.
+# A path that was not in Pre's status was clean, so its content then was its blob at Pre's HEAD ("missing" if
+# there is none). Ignored files are invisible to `git status`; a checkout or pull that leaves the tree clean is not seen.
+# Paths with a newline in the name are skipped.
+set -uo pipefail
+
+# Builtin read on fd 0: Claude Code passes a socket, where opening /dev/stdin fails; no cat, so it works without PATH.
+IFS= read -r -d '' input || true
+exec 2>/dev/null
+[ -n "${COPILOT_CLI:-}" ] && exit 0 # Copilot payloads carry no tool call id
+command -v jq >/dev/null && command -v git >/dev/null || exit 0
+
+{ read -r event; read -r sid; read -r cwd; read -r tid; } < <(printf '%s' "$input" \
+  | jq -r '[.hook_event_name, .session_id, .cwd, .tool_use_id] | map(if type == "string" then . else "" end) | .[]') || exit 0
+sid=${sid//[^A-Za-z0-9_-]/}
+tid=${tid//[^A-Za-z0-9_-]/}
+[ -n "$sid" ] && [ -n "$tid" ] && [ -d "$cwd" ] || exit 0
+state="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/duty-framework}/sessions/$sid"
+
+export GIT_OPTIONAL_LOCKS=0
+
+status_paths() { # prints every path in `git status` of $PWD, one per line (a rename/copy's original included)
+  local e o
+  while IFS= read -r -d '' e; do
+    case ${e:3} in *$'\n'*) ;; *) printf '%s\n' "${e:3}" ;; esac
+    case ${e:0:2} in
+      *[RC]*) IFS= read -r -d '' o || break
+        case $o in *$'\n'*) ;; *) printf '%s\n' "$o" ;; esac ;;
+    esac
+  done < <(git status --porcelain=v1 -z --untracked-files=all 2>/dev/null)
+}
+
+hash_paths() { # paths...: prints "path<TAB>content hash" for each, "missing" if not a regular file; one git process
+  local p h i=0
+  local -a reg=() hs=()
+  [ $# -gt 0 ] || return 0
+  for p; do [ -f "$p" ] && reg+=("$p"); done
+  if [ ${#reg[@]} -gt 0 ]; then
+    while IFS= read -r h; do hs+=("$h"); done < <(printf '%s\n' "${reg[@]}" | git hash-object --stdin-paths 2>/dev/null)
+    [ ${#hs[@]} -eq ${#reg[@]} ] || return 1
+  fi
+  for p; do
+    if [ -f "$p" ]; then printf '%s\t%s\n' "$p" "${hs[i]}"; i=$((i + 1)); else printf '%s\tmissing\n' "$p"; fi
+  done
+}
+
+head_blobs() { # head, paths...: prints "path<TAB>blob hash of path at head", "missing" if it has none
+  local h=$1 p l i=0
+  local -a out=()
+  shift
+  [ $# -gt 0 ] || return 0
+  if [ "$h" = none ]; then for p; do printf '%s\tmissing\n' "$p"; done; return 0; fi
+  while IFS= read -r l; do out+=("$l"); done < <(for p; do printf '%s:%s\n' "$h" "$p"; done | git cat-file --batch-check='%(objecttype) %(objectname)' 2>/dev/null)
+  [ ${#out[@]} -eq $# ] || return 1
+  for p; do
+    l=${out[i]}; i=$((i + 1))
+    if [ "${l%% *}" = blob ]; then printf '%s\t%s\n' "$p" "${l#* }"; else printf '%s\tmissing\n' "$p"; fi
+  done
+}
+
+case $event in
+  PreToolUse)
+    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ] || exit 0
+    case $top in *$'\n'*) exit 0 ;; esac
+    cd "$top" || exit 0
+    head=$(git rev-parse -q --verify HEAD 2>/dev/null) || head=none
+    paths=(); while IFS= read -r p; do paths+=("$p"); done < <(status_paths | LC_ALL=C sort -u) # unique, like Post: status can list a path twice
+    rec=$(hash_paths ${paths[@]+"${paths[@]}"}) || exit 0
+    # pre files nobody consumed (no Post fired, e.g. the call was denied): drop those older than a day
+    find "$state/pre" -type f -mmin +1440 -delete 2>/dev/null
+    mkdir -p "$state/pre" && { printf '%s\n%s\n' "$top" "$head"; [ -z "$rec" ] || printf '%s\n' "$rec"; } > "$state/pre/$tid"
+    ;;
+  PostToolUse|PostToolUseFailure)
+    [ -f "$state/pre/$tid" ] || exit 0
+    { IFS= read -r top; IFS= read -r head; IFS= read -r -d '' pre; } < "$state/pre/$tid"
+    rm -f "$state/pre/$tid"
+    pre=${pre%$'\n'}
+    [ -n "$top" ] && [ -n "$head" ] && cd "$top" 2>/dev/null || exit 0
+    prekeys=(); while IFS= read -r l; do [ -z "$l" ] || prekeys+=("${l%$'\t'*}"); done <<<"$pre"
+    stat_paths=(); while IFS= read -r p; do stat_paths+=("$p"); done < <(status_paths)
+    # paths in status now but not in Pre: clean at Pre, so their old content is the blob at Pre's HEAD
+    absent=(); while IFS= read -r p; do [ -z "$p" ] || absent+=("$p"); done < <(LC_ALL=C comm -13 \
+      <(printf '%s\n' ${prekeys[@]+"${prekeys[@]}"} | LC_ALL=C sort -u) <(printf '%s\n' ${stat_paths[@]+"${stat_paths[@]}"} | LC_ALL=C sort -u))
+    union=(); while IFS= read -r p; do [ -z "$p" ] || union+=("$p"); done < <(printf '%s\n' ${prekeys[@]+"${prekeys[@]}"} ${stat_paths[@]+"${stat_paths[@]}"} | LC_ALL=C sort -u)
+    [ ${#union[@]} -gt 0 ] || exit 0 # nothing dirty before or after
+    old=$({ [ -z "$pre" ] || printf '%s\n' "$pre"; head_blobs "$head" ${absent[@]+"${absent[@]}"}; }) || exit 0
+    new=$(hash_paths "${union[@]}") || exit 0
+    [ "$(printf '%s\n' "$old" | LC_ALL=C sort)" = "$(printf '%s\n' "$new" | LC_ALL=C sort)" ] || printf '%s\n' "$tid" >> "$state/bash-edits"
+    ;;
+esac
+exit 0

@@ -3,6 +3,7 @@
 ## Git: local changes only
 - Never run `git commit`, `merge`, `push`, `stash`, `reset`, `checkout -- <file>`, or create branches/PRs. Read-only git (`status`, `diff`, `log`, `blame`) is fine.
 - Leave all changes uncommitted; I review and write my own commit messages.
+- In Claude Code a hook blocks these (and apply/deploy commands); if it blocks something I asked for, tell me instead of working around it.
 
 ## Real environments: read-only
 - Never apply, deploy, publish or otherwise change anything outside the working copy without my explicit permission, with any tool: infrastructure (`terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`), cloud CLIs, database migrations or writes, package publishes, releases.
@@ -16,9 +17,10 @@
 ## Match the process to the task
 - Start your reply to each new task with `Size: small|medium|large|quick` so I can correct it.
 - **Small** (typo, rename, one-line fix, a question): just do it.
-- **Medium** (a bug, a small feature): short plan in chat, wait for my OK, then do it, then a refuter subagent reviews it before handoff (`team`, steps 4–5).
+- **Medium** (a bug, a small feature): one short message with what changes, which files and how to verify it; wait for my OK (one OK covers design and plan), then do it, then a refuter subagent reviews it before handoff (`team`, steps 4–5).
 - **Large** (new feature, refactor, many files): all steps below, as orchestrator: load the `team` skill and run it. The refuter is never skipped.
 - **Quick** (I said "quick"): skip the ceremony.
+- Steps 1–2 below are the full process for large tasks; for medium, the short plan above replaces them.
 
 ## 1. Understand before building
 - Before proposing a design, look at the repo's architecture (stack, structure, conventions) so the design fits it; still unsure about the design after that? Ask me.

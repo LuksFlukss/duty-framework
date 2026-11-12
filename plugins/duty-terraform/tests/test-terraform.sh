@@ -231,7 +231,8 @@ ok_or_fail "agy rule: trigger glob, globs *.tf and *.tfvars" $?
 # --- validators
 if command -v claude >/dev/null; then
   out=$(claude plugin validate "$ROOT" 2>&1)
-  if [ $? -eq 0 ] && ! printf '%s' "$out" | grep -qi 'warning'; then
+  # newer validate appends an advisory plugin-directory section whose warnings don't affect the result
+  if [ $? -eq 0 ] && ! printf '%s\n' "$out" | sed -e '/^Plugin directory checks/,/^These plugin directory checks do not change the result below\.$/d' -e '/^The directory also runs a safety scan/d' | grep -qi 'warning'; then
     echo "ok   claude plugin validate"
   else
     echo "FAIL claude plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))

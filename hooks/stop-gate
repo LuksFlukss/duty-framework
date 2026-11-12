@@ -1,39 +1,86 @@
 #!/usr/bin/env bash
-# Claude Code Stop hook: blocks handoff of a medium/large task with edits but no refuter review (large: and no team skill).
+# Stop hook (Claude Code Stop, Copilot CLI agentStop): blocks handoff of a medium/large task with edits but no refuter review (large: and no team skill).
 set -uo pipefail
 
-command -v jq >/dev/null || exit 0
+# State root: edit-track writes <root>/sessions/<session id>/bash-edits; DUTY_DEBUG=1 logs to <root>/stop-gate.log.
+root="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/duty-framework}"
+sid=
+log() { # outcome; never fails and never touches stdout; every exit path calls it once
+  [ "${DUTY_DEBUG:-}" = 1 ] || return 0
+  { mkdir -p "$root" && printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${sid:--}" "$1" >> "$root/stop-gate.log"; } >/dev/null 2>&1 || true
+}
+command -v jq >/dev/null || { log "allow: no jq"; exit 0; }
 input=$(cat)
-path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
-[ -n "$path" ] && [ -r "$path" ] || exit 0
+path=$(printf '%s' "$input" | jq -r '.transcript_path // .transcriptPath // empty' 2>/dev/null) || { log "allow: bad input"; exit 0; }
+sid=$(printf '%s' "$input" | jq -r '(.session_id // .sessionId) | strings' 2>/dev/null)
+sid=${sid//[^A-Za-z0-9_-]/}
+if ! { [ -n "$path" ] && [ -r "$path" ]; }; then log "allow: no transcript"; exit 0; fi
+
+# ids of Bash calls that changed the tree (edit-track); no file, no ids
+bashids='[]'
+[ -n "$sid" ] && [ -r "$root/sessions/$sid/bash-edits" ] \
+  && { bashids=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$root/sessions/$sid/bash-edits" 2>/dev/null) || bashids='[]'; }
 
 # last_assistant_message is ignored: a label there would come after the turn's edits.
-jq -ncR '
+res=$(jq -ncR --argjson bashids "$bashids" '
   def agent($suffix): .type == "tool_use" and (.name == "Agent" or .name == "Task")
-    and ((.input.subagent_type // "") | endswith($suffix));
+    and ((.input.subagent_type | strings) // "" | endswith($suffix));
   def edit: (.type == "tool_use" and (.name == "Write" or .name == "Edit" or .name == "NotebookEdit")
-    and ((.input.file_path // .input.notebook_path // "") | contains("/.claude/") | not)) or agent("builder");
+    and ((.input.file_path // .input.notebook_path // "") | contains("/.claude/") | not)) or agent("builder")
+    # a Bash call edit-track saw change the tree
+    or (.type == "tool_use" and .name == "Bash" and (.id as $i | $bashids | index($i) != null));
   # a user prompt starts a turn; tool results and meta entries (skill bodies, hand-backs) do not
   def boundary: .type == "user" and (.isMeta != true) and (.message.content
     | (type == "string") or (type == "array" and any(.[]; .type? == "text") and (any(.[]; .type? == "tool_result") | not)));
-  def sizelabel: capture("\\A[\\s#>*_`]*Size:[\\s*_`]*(?<s>small|medium|large|quick)\\b(?![\\s*_`]*[|/,])"; "i").s | ascii_downcase;
+  # Copilot tool calls in the Claude shapes used below; other tools are ignored.
+  # Edits under /.copilot/ are dropped here, the rest pass as an Edit without a path (/.claude/ only counts as config in Claude).
+  def copilottool: .arguments as $raw | ($raw | if type == "object" then . else {} end) as $a
+    | def copilotedit($files): if ($files | length > 0) and all($files[]; contains("/.copilot/")) then empty
+        else {type: "tool_use", name: "Edit", input: {}} end;
+    if .toolName == "edit" or .toolName == "create" then copilotedit([$a.path | strings])
+      # apply_patch (GPT models), {input: patch} or the raw patch: its files are on the "*** ... File:" / "*** Move to:" lines
+      elif .toolName == "apply_patch" then copilotedit([ $raw | if type == "object" then .input else . end | strings
+        | capture("(?:^|\n)[ \t]*\\*\\*\\* (?:(?:Add|Update|Delete) File|Move to): (?<f>[^\n]+)"; "g").f ])
+      elif .toolName == "task" then {type: "tool_use", id: .toolCallId, name: "Agent",
+        input: {subagent_type: ($a.agent_type // ""), run_in_background: ($a.mode == "background")}}
+      elif .toolName == "skill" then {type: "tool_use", name: "Skill", input: {skill: ($a.skill // "")}}
+      else empty end;
+  def sizelabel: strings | capture("\\A[\\s#>*_`]*Size:[\\s*_`]*(?<s>small|medium|large|quick)\\b(?![\\s*_`]*[|/,])"; "i").s | ascii_downcase;
 
   # one JSON entry per line; malformed lines are skipped
   [ inputs | fromjson? | objects ]
+  # Copilot CLI events.jsonl; events from inside a subagent carry agentId (older: data.parentToolCallId).
+  # A block from this hook comes back as a user.message starting "duty-framework:": no turn boundary.
+  # A real prompt starting with "duty-framework:" is skipped the same way, so it does not start a new turn either.
+  | if any(.[]; (.type? | strings) | test("^(user|assistant)\\.message$")) then
+      map(select((.data | type) == "object"))
+      | { refs: [], done: [ .[] | select(.type == "subagent.completed" or .type == "subagent.failed") | .data.toolCallId ],
+        ev: [ .[] | select(.agentId == null and .data.parentToolCallId == null)
+              | if .type == "user.message" then
+                  if (.data.content // "" | tostring | startswith("duty-framework:")) then empty else {type: "boundary"} end
+                elif .type == "assistant.message" then {type: "text", text: (.data.content // "")}
+                elif .type == "tool.execution_start" then .data | copilottool
+                else empty end ] }
+    else .
   # background agents that reported back (task-notification, any status), by launching tool_use id.
   # On resume a "stopped" notification carries only <task-id>: the agentId from the launch result.
   | [ .[] | select(.type != "assistant") | .. | strings | select(startswith("<task-notification>")) ] as $notes
   | [ .[] | select(.type == "user") | .message.content? | arrays | .[] | select(.type? == "tool_result")
       | { id: .tool_use_id, ag: (.content | if type == "array" then map(.text? // "") | join("\n")
-          elif type == "string" then . else "" end | capture("agentId: (?<a>[A-Za-z0-9]+)").a) } ] as $launched
+          elif type == "string" then . else "" end | [capture("agentId: (?<a>[A-Za-z0-9]+)"; "g").a] | last // empty) } ] as $launched
   | [ $notes[] | capture("<task-id>(?<t>[^<]+)</task-id>"; "g").t ] as $doneTasks
   | ([ $notes[] | capture("<tool-use-id>(?<id>[^<]+)</tool-use-id>"; "g").id ]
      + [ $launched[] | select(.ag as $a | $doneTasks | index($a)) | .id ]) as $done
+  # refuters a SendMessage can resume: by name, or by the agentId from their launch result
+  | [ .[] | select(.type == "assistant") | .message.content? | arrays | .[] | select(agent("refuter")) ] as $rf
+  | ([ $rf[].input.name? | strings ] + [ $launched[] | select(.id as $i | any($rf[]; .id == $i)) | .ag ]) as $refs
   # ordered events: turn boundaries, assistant text and tool_use blocks
-  | [ .[] | if boundary then {type: "boundary"}
-            elif .type == "assistant" then .message.content? | arrays | .[] | select(.type == "text" or .type == "tool_use")
-            else empty end ]
-  | . as $ev
+  | { done: $done, refs: $refs,
+      ev: [ .[] | if boundary then {type: "boundary"}
+                  elif .type == "assistant" then .message.content? | arrays | .[] | select(.type == "text" or .type == "tool_use")
+                  else empty end ] }
+    end
+  | .done as $done | .refs as $refs | .ev as $ev | $ev
   # last label that comes before the first edit of its turn
   | (reduce range(length) as $i ({edited: false, size: null}; $ev[$i] as $e
       | if $e.type == "boundary" then .edited = false
@@ -47,7 +94,8 @@ jq -ncR '
       - $done | length == 0)
   | ([ $after[] | select(.value | edit) | .key ] | last) as $lastEdit
   | select($lastEdit != null)
-  | ([ $ev[$lastEdit + 1:][] | select(agent("refuter")) ] | length > 0) as $refuted
+  | ([ $ev[$lastEdit + 1:][] | select(agent("refuter") or (.type == "tool_use" and .name == "SendMessage"
+       and (.input.to? as $t | any($refs[]; . == $t)))) ] | length > 0) as $refuted
   | ([ $after[].value | select(.type == "tool_use" and .name == "Skill"
        and (.input.skill == "team" or .input.skill == "duty-framework:team")) ] | length > 0) as $team
   | select(($refuted | not) or ($size.s == "large" and ($team | not)))
@@ -59,4 +107,10 @@ jq -ncR '
         + (if $size.s == "large" and ($team | not) then "Load the team skill, run" else "Run" end)
         + (if $refuted then " it" else " a refuter subagent on the final changes (send back findings, max 2 rounds)" end)
         + ", then hand off.") }
-' "$path" 2>/dev/null || exit 0
+' "$path" 2>/dev/null) || { log "allow: jq failed"; exit 0; }
+if [ -n "$res" ]; then
+  printf '%s\n' "$res"
+  log "block: $(printf '%s' "$res" | jq -r '.reason // empty' 2>/dev/null)"
+else
+  log allow
+fi
