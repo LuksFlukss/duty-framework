@@ -939,7 +939,7 @@ fi
 
 if command -v agy >/dev/null; then
   out=$(agy plugin validate "$ROOT" 2>&1)
-  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 9 processed' && printf '%s' "$out" | grep -q 'agents *: 5 processed'; then
+  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills 9' && printf '%s' "$out" | grep -q 'agents 5'; then
     echo "ok   agy plugin validate"
   else
     echo "FAIL agy plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))

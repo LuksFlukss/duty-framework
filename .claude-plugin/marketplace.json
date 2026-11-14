@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "duty-framework",
-      "description": "Always-on working rules plus eight small skills",
+      "description": "Always-on working rules plus nine small skills",
       "version": "0.4.2",
       "source": "./"
     },
