@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook on Bash: denies git writes and apply/deploy commands before they run.
+# Claude Code PreToolUse hook on Bash: denies git writes, and asks the user (permission prompt) before
+# apply/deploy commands run, with a DESTRUCTIVE: marker on deletes.
 # A safety net against mistakes, not a security boundary: bash -c, eval, scripts and aliases get past it.
 # Lifted for a session by starting Claude Code with DUTY_ALLOW_GIT_WRITE=1 or DUTY_ALLOW_APPLY=1;
 # an assignment inside the command itself is part of the command and lifts nothing.
@@ -67,7 +68,22 @@ tf_verb() {
   esac
 }
 
-# Prints "git <label>" or "apply <label>" for a blocked simple command.
+# az rest: a write when --method/-m (also --method=x, -m=x, -mx) is put, post, patch or delete; the default is get.
+az_rest() { # args after "rest"
+  local a m= prev=
+  for a in "$@"; do
+    case $prev in -m|--method) m=$a ;; esac
+    case $a in --method=*|-m=*) m=${a#*=} ;; -m?*) m=${a#-m} ;; esac
+    prev=$a
+  done
+  m=${m,,}
+  case $m in
+    put|post|patch|delete) echo "apply az rest $m" ;;
+    *_q_*) echo "apply az rest --method (quoted)" ;; # a quoted value can't be read: ask to be safe
+  esac
+}
+
+# Prints "git <label>", "apply <label>" or "ask <label>" for a blocked (or ask-first) simple command.
 check() { # words...
   local w=("$@") i=0 t pre=
   # skip prefixes (sudo -u x, env -u x, nice -n 5, timeout -s KILL 60, VAR=val, shell keywords)
@@ -128,15 +144,23 @@ check() { # words...
     az)
       # only the command words count (az group delete): the positionals from the first one up to the first option word.
       # Option values (--tag start, --container-name stop) and words after an option never do.
-      local skip=0 started=0
-      for a in "${w[@]}"; do
+      # az rest is the exception: its --method/-m decides. invoke (run-command, aks command) runs code on a real
+      # machine: "ask" lets the user approve it in the permission prompt instead of a deny.
+      local skip=0 started=0 i
+      for ((i = 0; i < ${#w[@]}; i++)); do
+        a=${w[i]}
         if [ $skip = 1 ]; then skip=0
         elif [[ $a == -* ]]; then
           [ $started = 1 ] && break
           [[ ' -n --name -g --resource-group --subscription -l --location --query -o --output --ids ' == *" $a "* ]] && skip=1
         else
+          if [ $started = 0 ] && [ "$a" = rest ]; then az_rest "${w[@]:i+1}"; return; fi
           started=1
-          case $a in create|delete|update|set|add|remove|start|stop|restart|purge) echo "apply az $a"; return ;; esac
+          case $a in
+            create|delete|update|set|add|remove|start|stop|restart|purge|deallocate|backup-now|attach|detach|resize|redeploy|reimage|restore|delete-*|remove-*|purge-*)
+              echo "apply az $a"; return ;;
+            invoke) echo "ask az $a"; return ;;
+          esac
         fi
       done ;;
     aws)
@@ -159,6 +183,9 @@ check() { # words...
 }
 
 IFS=';' read -ra segs <<<"$cmd"
+# git writes are denied at once. apply/deploy commands (group apply, and ask for az invoke) get a permission prompt
+# instead: remember the first one, preferring a destructive one, and keep scanning so a git write later still denies.
+ask= askd=
 for seg in "${segs[@]}"; do
   read -ra words <<<"$seg"
   [ ${#words[@]} -gt 0 ] || continue
@@ -168,11 +195,33 @@ for seg in "${segs[@]}"; do
   if [ "$group" = git ]; then
     [ "${DUTY_ALLOW_GIT_WRITE:-}" = 1 ] && continue
     reason="duty-framework: \`$label\` is blocked: no git writes, leave all changes uncommitted for the user to review (RULES.md). If the user explicitly asked for it, ask them to run it themselves, or to restart Claude Code with DUTY_ALLOW_GIT_WRITE=1."
-  else
-    [ "${DUTY_ALLOW_APPLY:-}" = 1 ] && continue
-    reason="duty-framework: \`$label\` is blocked: real environments are read-only, use plan/validate/diff/--dry-run instead (RULES.md). If the user explicitly asked for it, ask them to run it themselves, or to restart Claude Code with DUTY_ALLOW_APPLY=1."
+    jq -cn --arg r "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+    exit 0
   fi
-  jq -cn --arg r "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
-  exit 0
+  [ "${DUTY_ALLOW_APPLY:-}" = 1 ] && continue
+  destructive=
+  for a in $label; do
+    case $a in destroy|destroy-all|delete|delete-*|purge|purge-*|remove|uninstall|terminate-*|rm|rb|reimage|restore) destructive=1 ;; esac
+  done
+  # terraform/tofu/terragrunt state push overwrites the remote state
+  case " $label " in *" state push "*) destructive=1 ;; esac
+  # flags that make an apply destructive: terraform apply -destroy, aws s3 sync --delete
+  for a in "${words[@]}"; do
+    case $a in -destroy|--destroy|-destroy=true|--destroy=true|--delete) destructive=1; label="$label $a"; break ;; esac
+  done
+  # priority for the prompt text: destructive, then invoke (group ask), then any other apply
+  if [ -n "$destructive" ]; then [ -n "$askd" ] || askd=$label
+  elif [ -z "$ask" ] || { [ "$group" = ask ] && [ "${ask%% *}" != ask ]; }; then ask="$group $label"; fi
 done
+skip="DUTY_ALLOW_APPLY=1 skips this prompt for a session."
+if [ -n "$askd" ]; then
+  reason="duty-framework: DESTRUCTIVE: \`$askd\` deletes or overwrites something in a real environment (RULES.md). Approve only if you explicitly asked for exactly this. $skip"
+elif [ "${ask%% *}" = ask ]; then
+  reason="duty-framework: \`${ask#* }\` runs code on a real machine (RULES.md: real environments are read-only). Approve only if you asked for this run. $skip"
+elif [ -n "$ask" ]; then
+  reason="duty-framework: \`${ask#* }\` changes a real environment (RULES.md: read-only without explicit permission). Approve only if you asked for this change. $skip"
+else
+  exit 0
+fi
+jq -cn --arg r "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $r}}'
 exit 0

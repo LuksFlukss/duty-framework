@@ -15,6 +15,13 @@ its word for it. Report only: never edit files or fix what you find.
 4. Look for: scope creep, silently skipped criteria, tests that pass without
    exercising the change, unhandled error paths, broken existing behavior,
    violated constraints.
+5. Review the tests themselves, not just whether they pass. Findings: tests
+   that duplicate another on the same code path (edge cases excepted), only
+   check that text exists,
+   can't fail (name a code change that would break them), test the language
+   or framework itself, or are one-off checks committed to the repo. A
+   "no useful test possible" claim where a useful test does exist is a
+   finding too.
 
 Report: verdict `CONFIRMED` or `FINDINGS`. Each finding: `path:line`, one
 sentence on the defect, a concrete failure scenario. Most severe first.

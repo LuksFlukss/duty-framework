@@ -11,17 +11,18 @@ Goal: you and the user agree on what to build before any code is written.
 
 1. **Size it.** State it as `Size: small|medium|large|quick` at the start of your reply, so the user can correct you.
    - Small: skip this skill, just do it.
-   - Medium: a few sentences of plan in chat, wait for OK, then do it, then a refuter review before handoff.
+   - Medium: a few sentences of plan in chat, wait for OK, then do it, then a refuter review before handoff. Building something new? Run step 4 (prior art) before the plan.
    - Large: continue below.
    - "quick" from the user: skip the ceremony.
 2. **Read the current architecture first.** Search the repo (read-only) for its stack, structure and conventions, plus the relevant code, docs and recent changes, so the design builds on what's there and your questions are informed. Still unsure about the design after that? Ask in step 3.
 3. **Ask what they're trying to achieve.** One question per message. Prefer multiple choice. Stop asking once you can describe the outcome and how you'd know it works.
-4. **Propose a short design:**
+4. **Check for prior art** (`prior-art` skill) when the task builds something new and the goal is clear: search for an existing tool or solution, show the candidates and ask the user whether to use, adapt or build our own.
+5. **Propose a short design:**
    - what changes and why
    - which tech (best fit for the circumstances) and which files
    - trade-offs, and the alternative you rejected
    - how it will be verified
-5. **Wait for OK.** No implementation, scaffolding or installs before it. An answer to a clarifying question is not an OK: ask for it explicitly. Then use the `plan` skill.
+6. **Wait for OK.** No implementation, scaffolding or installs before it. An answer to a clarifying question is not an OK: ask for it explicitly. Then use the `plan` skill.
 
 ## Rules
 

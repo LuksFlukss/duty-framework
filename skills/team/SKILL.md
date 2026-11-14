@@ -40,7 +40,9 @@ Run only what's needed, and tell the user which roles you'll use and why
 before starting them:
 
 - **scout**: skip if every file to touch is already known.
-- **researcher**: skip if nothing unfamiliar or external is involved.
+- **researcher**: skip if nothing unfamiliar or external is involved. When the
+  task builds something new, it does the web and docs part of the `prior-art`
+  search; you run the `gh` and MCP part (it has no shell or MCP tools).
 - **builder**: one per independent part of the plan; parallel only if they
   touch no shared files. Tightly coupled work goes to one builder, or do it
   yourself.

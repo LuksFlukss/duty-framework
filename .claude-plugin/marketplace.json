@@ -1,12 +1,14 @@
 {
   "name": "duty-framework",
   "description": "Marketplace for duty-framework",
-  "owner": { "name": "Louka Vanhoucke" },
+  "owner": {
+    "name": "Louka Vanhoucke"
+  },
   "plugins": [
     {
       "name": "duty-framework",
       "description": "Always-on working rules plus eight small skills",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "source": "./"
     },
     {

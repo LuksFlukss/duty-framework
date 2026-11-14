@@ -51,6 +51,7 @@ The plugin starts HashiCorp's Terraform MCP server (public registry tools only) 
 1. Read the existing layout and naming; match it.
 2. Look up every resource and module through the MCP. Pin provider and module versions to what the MCP reports (`~>` for providers, exact or `?ref=` tag for modules). Prefer an AVM or `terraform-aws-modules` module over raw resources when one fits.
 3. Make the smallest change. Don't add variables, outputs or abstractions nobody asked for.
+   - Credentials a resource forces on you (VM local admin password, DB admin password) never go into state as a working secret. Use a write-only argument if the resource has one (`*_wo` + `*_wo_version`, azapi `sensitive_body`, fed by an `ephemeral` resource). Otherwise, no `random_password`: set a literal placeholder that meets the provider's complexity rules, add `lifecycle { ignore_changes = [<password attr>] }`, and tell the user to overwrite it out of band right after the first apply (e.g. `az vm user update`). Also warn that the placeholder works for anyone who can reach the login until it's replaced.
 4. Check: `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`, `tflint` (if installed). Show the output.
 5. Tell the user which plan to run to see the real effect.
 

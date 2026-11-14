@@ -1,8 +1,10 @@
 {
   "name": "duty-framework",
   "description": "Always-on working rules (local changes only, size-matched process, test first, verify before done) plus eight small skills",
-  "version": "0.4.1",
-  "author": { "name": "Louka Vanhoucke" },
+  "version": "0.4.2",
+  "author": {
+    "name": "Louka Vanhoucke"
+  },
   "license": "MIT",
   "agents": [
     "./claude-agents/scout.md",

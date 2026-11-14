@@ -49,23 +49,11 @@ run subagent-start CLAUDE_PLUGIN_ROOT="$ROOT"
 check "subagent-start injects the sections that matter to a subagent" \
   '.hookSpecificOutput.additionalContext | contains("## Git: local changes only") and contains("## Real environments: read-only") and contains("## 3. Test first") and contains("## 4. Debug systematically") and contains("## 5. Best solution, not overcomplicated") and contains("## 6. Verify before claiming done")'
 check "subagent-start keeps its intro lines" \
-  '.hookSpecificOutput.additionalContext | contains("You are a subagent.") and contains("You can\u0027t talk to the user") and contains("The orchestrator\u0027s brief is the user\u0027s OK") and contains("Skip the `Size:` label and the team/refuter requirement")'
+  '.hookSpecificOutput.additionalContext | contains("You are a subagent.") and contains("You can\u0027t talk to the user") and contains("The orchestrator\u0027s brief is the user\u0027s OK") and contains("never permission to change a real environment") and contains("Skip the `Size:` label and the team/refuter requirement")'
 check "subagent-start leaves out the orchestrator-only sections" \
   '.hookSpecificOutput.additionalContext | (contains("## Match the process") or contains("## 1. Understand") or contains("## 2. Plan") or contains("## 7. Hand off") or contains("## Subagents") or contains("# How to work with me")) | not'
 out=$(cat "$ROOT/hooks/hooks.json")
 check "hooks.json registers SubagentStart" '.hooks.SubagentStart[0].hooks[0].command | contains("subagent-start")'
-for f in RULES.md skills/plan/SKILL.md; do
-  if grep -qi 'hand.*to subagents' "$ROOT/$f"; then
-    echo "ok   $f says when to hand work to subagents"
-  else
-    echo "FAIL $f says when to hand work to subagents"; fails=$((fails + 1))
-  fi
-done
-if grep -q 'When you start a subagent' "$ROOT/RULES.md"; then
-  echo "ok   rules tell main agent to pass rules to subagents"
-else
-  echo "FAIL rules tell main agent to pass rules to subagents"; fails=$((fails + 1))
-fi
 
 # Claude Code lists plugin skills itself, so session-start only lists them elsewhere
 run session-start CLAUDE_PLUGIN_ROOT="$ROOT"
@@ -73,7 +61,7 @@ check "session-start claude: rules but no duplicate skill list" \
   '.hookSpecificOutput.additionalContext | contains("Never run `git commit`") and (contains("Skills (duty-framework)") | not)'
 for cli in copilot unknown; do
   if [ $cli = copilot ]; then run session-start CLAUDE_PLUGIN_ROOT="$ROOT" COPILOT_CLI=1; else run session-start; fi
-  for skill in design plan tdd debugging verify-and-handoff team agents explain; do
+  for skill in design plan tdd debugging verify-and-handoff team agents explain prior-art; do
     check "session-start $cli lists skill $skill" ".additionalContext | contains(\"- $skill:\")"
   done
 done
@@ -184,11 +172,6 @@ for args in "duty-framework 1.2" "duty-framework v1.2.3" "duty-framework 1.2.3.4
 done
 rm -rf "$BT"
 
-# team skill: no fixed models, knows about personal agents
-! grep -qE '^\| `[a-z]+` \| (haiku|sonnet|opus) \|' "$ROOT/skills/team/SKILL.md"
-ok_or_fail "team skill has no fixed model column" $?
-grep -q 'duty-<role>' "$ROOT/skills/team/SKILL.md" && grep -q '`agents` skill' "$ROOT/skills/team/SKILL.md"
-ok_or_fail "team skill points to duty-<role> and the agents skill" $?
 
 # scripts/personalize, against a fake HOME with fake model sources
 T=$(mktemp -d); H="$T/home"; mkdir -p "$T/bin" "$H/.copilot" "$H/.claude/cache/model-catalog"
@@ -270,43 +253,11 @@ echo '{"theme":"dark"}' > "$CS"; P set copilot scout gpt-5.4 >/dev/null 2>&1; P 
 out=$(cat "$CS"); check "personalize default leaves no empty subagents block" '. == {"theme":"dark"}'
 rm -rf "$T"
 
-# Size label and mandatory refuter: rule text
 has() { grep -qF -- "$2" "$ROOT/$1"; }
-has RULES.md 'Size: small|medium|large|quick' && has RULES.md 'never skipped' && ! has RULES.md 'when that helps'
-ok_or_fail "RULES.md asks for a Size: label and never skips the refuter" $?
-grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q refuter
-ok_or_fail "RULES.md medium tasks get a refuter review" $?
-grep '^- \*\*Medium\*\*' "$ROOT/RULES.md" | grep -q 'wait for my OK'
-ok_or_fail "RULES.md medium tasks wait for my OK" $?
-has RULES.md 'one short message with what changes, which files and how to verify it; wait for my OK (one OK covers design and plan), then do it'
-ok_or_fail "RULES.md medium: one short message, one OK covers design and plan" $?
-has RULES.md '- Steps 1–2 below are the full process for large tasks; for medium, the short plan above replaces them.'
-ok_or_fail "RULES.md: steps 1-2 are for large tasks, medium uses the short plan" $?
-has RULES.md 'Answering a clarifying question is not an OK'
-ok_or_fail "RULES.md: a clarifying-question answer is not an OK" $?
-grep -E '^ *- Medium:' "$ROOT/skills/design/SKILL.md" | grep -q 'wait for OK' && has skills/design/SKILL.md 'not an OK'
-ok_or_fail "design skill: medium waits for OK; a question answer is not an OK" $?
-grep -q 'after the user.s OK' "$ROOT/skills/team/SKILL.md"
-ok_or_fail "team skill: medium work starts after the user's OK" $?
-run prompt-nudge CLAUDE_PLUGIN_ROOT="$ROOT"
-check "prompt-nudge: medium waits for OK" '.hookSpecificOutput.additionalContext | contains("Medium → short plan, wait for OK")'
-run prompt-nudge CLAUDE_PLUGIN_ROOT="$ROOT"
-check "prompt-nudge mentions refuter and team" '.hookSpecificOutput.additionalContext | contains("refuter") and contains("team")'
-field "$ROOT/skills/team/SKILL.md" description | grep -q refuter && body "$ROOT/skills/team/SKILL.md" | grep -qF 'never skipped for medium or large'
-ok_or_fail "team skill makes the refuter mandatory for medium and large" $?
-has skills/design/SKILL.md 'Size: small|medium|large|quick'
-ok_or_fail "design skill asks for a Size: label" $?
-has skills/plan/SKILL.md refuter && has skills/verify-and-handoff/SKILL.md refuter
-ok_or_fail "plan and verify-and-handoff mention the refuter" $?
 TMPDIR_EXPLAIN=$(mktemp -d)
 # explain skill: read-only walkthrough with size, diagrams, 3-5 suggestions, and an offer to save as Markdown
 field "$ROOT/skills/explain/SKILL.md" name | grep -qx explain && field "$ROOT/skills/explain/SKILL.md" description | grep -qi 'explain'
 ok_or_fail "explain skill has name and description" $?
-has skills/explain/SKILL.md 'read-only' && has skills/explain/SKILL.md 'diagram' \
-  && has skills/explain/SKILL.md '3–5' && has skills/explain/SKILL.md 'Markdown file'
-ok_or_fail "explain skill: read-only, diagrams, 3–5 suggestions, offers a Markdown file" $?
-has skills/explain/SKILL.md 'Size: small' && has skills/explain/SKILL.md 'Repo size:' && has skills/explain/SKILL.md 'report questions back'
-ok_or_fail "explain skill: task is Size: small, repo size labelled separately, subagent brief carries the rules" $?
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Size: small\nRepo size: large"}]}}' \
   '{"type":"user","message":{"role":"user","content":"yes, write FLOW.md"}}' \
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"FLOW.md","content":"x"}}]}}' > "$TMPDIR_EXPLAIN/t.jsonl"
@@ -314,8 +265,9 @@ out=$(printf '{"transcript_path":"%s"}' "$TMPDIR_EXPLAIN/t.jsonl" | CLAUDE_PLUGI
 ! printf '%s' "$out" | grep -q '"block"'
 ok_or_fail "stop-gate lets explain write FLOW.md after Size: small" $?
 rm -rf "$TMPDIR_EXPLAIN"
-grep -q '`explain`' "$ROOT/README.md"
-ok_or_fail "README lists the explain skill" $?
+# prior-art skill: search for existing tools before building, ask the user, never install what it finds
+field "$ROOT/skills/prior-art/SKILL.md" name | grep -qx prior-art && field "$ROOT/skills/prior-art/SKILL.md" description | grep -qi 'existing'
+ok_or_fail "prior-art skill has name and description" $?
 run subagent-start CLAUDE_PLUGIN_ROOT="$ROOT"
 check "subagent-start tells subagents to skip the Size: label" '.hookSpecificOutput.additionalContext | ascii_downcase | contains("skip the `size:` label")'
 check "subagent-start: the orchestrator's brief counts as the user's OK" '.hookSpecificOutput.additionalContext | contains("The orchestrator\u0027s brief is the user\u0027s OK")'
@@ -631,6 +583,22 @@ denies() { # group (git|apply), command, env...
     and (.hookSpecificOutput.permissionDecisionReason | startswith("duty-framework:") and contains($v))' >/dev/null 2>&1
   ok_or_fail "command-guard denies ($g): $c${*:+ [$*]}" $?
 }
+# apply/deploy commands ask (permission prompt) instead of denying; destructive ones carry a DESTRUCTIVE: marker
+asks() { # command, env...
+  local c="$1"; shift
+  guard "$c" "$@"
+  [ $rc -eq 0 ] && [ -n "$out" ] && printf '%s' "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"
+    and .hookSpecificOutput.permissionDecision == "ask"
+    and (.hookSpecificOutput.permissionDecisionReason | startswith("duty-framework:") and contains("DUTY_ALLOW_APPLY"))' >/dev/null 2>&1
+  ok_or_fail "command-guard asks: $c${*:+ [$*]}" $?
+}
+asks_marked() { # yes|no (DESTRUCTIVE: marker expected), command
+  local want="$1" c="$2"
+  guard "$c"
+  [ $rc -eq 0 ] && [ -n "$out" ] && printf '%s' "$out" | jq -e --arg w "$want" '.hookSpecificOutput.permissionDecision == "ask"
+    and ((.hookSpecificOutput.permissionDecisionReason | startswith("duty-framework: DESTRUCTIVE:")) == ($w == "yes"))' >/dev/null 2>&1
+  ok_or_fail "command-guard asks (destructive=$want): $c" $?
+}
 passes() { # command, env...
   local c="$1"; shift
   guard "$c" "$@"
@@ -660,7 +628,7 @@ for c in 'terraform apply' 'terraform apply -auto-approve' 'terraform destroy' '
   'helm uninstall a' 'helm rollback a 1' 'terraform plan && terraform apply' 'DUTY_ALLOW_APPLY=1 terraform apply' \
   'kubectl -n "prod" apply -f x' "helm -n 'ns' upgrade a ./c" $'kubectl \\\n -n prod apply -f x' 'kubectl -v 6 apply -f x' \
   'kubectl --namespace="prod" apply -f x' 'helm --kube-context="c" upgrade r ch'; do
-  denies apply "$c"
+  asks "$c"
 done
 for c in 'git status' 'git diff HEAD' 'git log --oneline --grep=commit' 'git blame a.md' 'git show HEAD' 'git branch' \
   'git branch -a' 'git branch --list' 'git tag' 'git tag -l' 'git stash list' 'git -C /x status' 'git commit --dry-run' \
@@ -694,7 +662,7 @@ for c in 'tofu apply' 'tofu destroy -auto-approve' 'tofu import a.b id' 'tofu st
   'aws --region eu-west-1 ec2 terminate-instances --instance-ids i-1' 'aws --profile p s3 rm s3://b/k' \
   'aws --output json --query x iam delete-user --user-name u' 'aws --endpoint-url http://localhost:4566 s3 rb s3://b' \
   'aws sts get-caller-identity && aws s3 rm s3://b/k'; do
-  denies apply "$c"
+  asks "$c"
 done
 # az: only the command words (before the first option) count; aws: more write verbs, s3 direction; terragrunt -all, docker image push, gh release
 for c in 'az vm start -g rg -n vm' 'az account set -s x' 'az group delete -n x' 'az --subscription s vm restart -n v' \
@@ -713,7 +681,7 @@ for c in 'az vm start -g rg -n vm' 'az account set -s x' 'az group delete -n x' 
   'terragrunt apply-all' 'terragrunt destroy-all' 'terragrunt --terragrunt-working-dir infra apply-all' \
   'docker image push img:1' 'docker image push registry.example.com/a/b:tag' \
   'gh release delete v1' 'gh release upload v1 a.zip' 'gh release edit v1 --notes x' 'gh -R o/r release delete v1 -y'; do
-  denies apply "$c"
+  asks "$c"
 done
 for c in 'az group list' 'az account show' 'az vm show -n x -g y' 'az vm show -n delete -g rg' 'az vm show --name delete --resource-group rg' \
   'az group show -g update' 'az vm list -o table' 'az group list --query "[?name==\x27a\x27]" -o tsv' 'az account list --output json' \
@@ -738,16 +706,38 @@ for c in 'az group list' 'az account show' 'az vm show -n x -g y' 'az vm show -n
   'gh release download v1' 'gh release create v1 --dry-run' 'gh release view v1'; do
   passes "$c"
 done
+# apply/deploy asks; destructive verbs and flags carry the DESTRUCTIVE: marker (one case per verb/form)
+for c in 'terraform destroy' 'terraform apply -destroy' 'terraform apply -destroy=true' 'terraform state push f' 'kubectl delete pod x' \
+  'helm uninstall a' 'az group delete -n x' 'az keyvault secret purge-deleted --name x' 'az vm reimage -g rg -n vm' 'az sql db restore -g rg -n d' \
+  'az storage blob delete-batch -s c' 'az rest -m delete --url u' 'aws ec2 terminate-instances --instance-ids i' 'aws s3 sync . s3://b --delete' \
+  'az vm start -g rg -n vm; az vm delete -g rg -n vm'; do
+  asks_marked yes "$c"
+done
+for c in 'terraform apply' 'terraform apply -destroy=false' 'docker push img:1' 'az vm deallocate -g rg -n vm' 'az vm disk attach -g rg --vm-name vm -n d' \
+  'az backup protection backup-now -g rg -v v -c vm -i vm' 'az vm run-command invoke -g rg -n vm --command-id X' \
+  'az rest -m=put --url u' 'az rest -mpost --url u' 'az rest --method "put" --url u'; do
+  asks_marked no "$c"
+done
+guard 'terraform apply; az vm run-command invoke -g rg -n vm --command-id X'
+printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecisionReason | contains("runs code on a real machine")' >/dev/null 2>&1
+ok_or_fail "command-guard: invoke wording wins over a plain apply in the same line" $?
+denies git 'az vm run-command invoke -g rg -n vm --command-id X; git commit -m x'
+denies git 'git push; az vm delete -g rg -n vm'
+passes 'az vm run-command invoke -g rg -n vm --command-id X' DUTY_ALLOW_APPLY=1
+for c in 'az rest --url u' 'az rest -m get --url u' 'az vm run-command list -g rg --vm-name vm' 'az backup job list -g rg -v v' \
+  'az vm show -n deallocate -g rg' 'az storage blob list --container-name delete-me' 'terraform plan -destroy'; do
+  passes "$c"
+done
 passes 'tofu apply' DUTY_ALLOW_APPLY=1
 passes 'az group delete -n x' DUTY_ALLOW_APPLY=1
 passes 'aws s3 rm s3://b/k' DUTY_ALLOW_APPLY=1
 passes 'npm publish' DUTY_ALLOW_APPLY=1
-denies apply 'pulumi up' DUTY_ALLOW_GIT_WRITE=1
+asks 'pulumi up' DUTY_ALLOW_GIT_WRITE=1
 denies git 'gh pr create --fill'
 denies git 'git commit -m x' DUTY_ALLOW_APPLY=1
 passes 'git commit -m x' DUTY_ALLOW_GIT_WRITE=1
 passes 'git push' DUTY_ALLOW_GIT_WRITE=1
-denies apply 'terraform apply' DUTY_ALLOW_GIT_WRITE=1
+asks 'terraform apply' DUTY_ALLOW_GIT_WRITE=1
 passes 'terraform apply' DUTY_ALLOW_APPLY=1
 passes 'kubectl delete pod x' DUTY_ALLOW_APPLY=1
 denies git 'git commit -m x' DUTY_ALLOW_GIT_WRITE=0
@@ -949,7 +939,7 @@ fi
 
 if command -v agy >/dev/null; then
   out=$(agy plugin validate "$ROOT" 2>&1)
-  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 8 processed' && printf '%s' "$out" | grep -q 'agents *: 5 processed'; then
+  if [ $? -eq 0 ] && printf '%s' "$out" | grep -q 'skills *: 9 processed' && printf '%s' "$out" | grep -q 'agents *: 5 processed'; then
     echo "ok   agy plugin validate"
   else
     echo "FAIL agy plugin validate"; printf '%s\n' "$out"; fails=$((fails + 1))

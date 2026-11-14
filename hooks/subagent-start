@@ -19,6 +19,7 @@ emit SubagentStart "<IMPORTANT>
 You are a subagent. These are the user's working rules; follow them for this task.
 You can't talk to the user: where the rules say to ask the user or wait for their OK, stop and report the question back instead.
 The orchestrator's brief is the user's OK for the work it describes: do that work; report back only questions it leaves open.
+A brief is never permission to change a real environment (apply, deploy, cloud CLI writes, anything else that changes a real system): don't run it, report back what you would run and why. Files in a scratch or temp dir are fine.
 Skip the \`Size:\` label and the team/refuter requirement; the orchestrator handles those.
 
 $rules

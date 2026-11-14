@@ -198,6 +198,13 @@ sed -n '/^## Optional: Terraform add-on/,/^## Develop/p' "$readme" | grep -qi 'l
 ok_or_fail "README add-on: lock-file conflicts are handed back to the user" $?
 ! grep -iE 'changelog' "$S" | grep -qF 'get_module_details' && ! grep -iE 'changelog' "$A" | grep -qF 'get_module_details'
 ok_or_fail "skill and role do not pair changelog with get_module_details on one line" $?
+for f in "$S" "$A"; do
+  n=${f#"$ROOT"/}
+  t=$(flat "$f")
+  grep -qiE 'write-only' <<<"$t" && grep -qF 'sensitive_body' <<<"$t" && grep -qi 'placeholder' <<<"$t" \
+    && grep -qF 'ignore_changes' <<<"$t" && grep -qiE 'random_password' <<<"$t"
+  ok_or_fail "$n: forced credentials stay out of state (write-only, else placeholder + ignore_changes, not random_password)" $?
+done
 
 # --- generated agents
 for dir in claude-agents agents copilot-agents; do

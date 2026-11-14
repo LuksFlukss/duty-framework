@@ -24,6 +24,7 @@ Leave everything uncommitted. Then give the user:
 
 - **Changed files** — one line each on what changed
 - **Tested** — the commands run and their results
+- **Changed in a real environment** — only if you changed one: each change and how to undo it
 - **Unsure / left out** — open questions, skipped items, assumptions
 
 Then wait. The user reviews and may come back for another round.
