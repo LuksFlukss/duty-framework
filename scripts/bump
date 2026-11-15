@@ -2,12 +2,12 @@
 # Sets a plugin's version everywhere it is written: its .claude-plugin/plugin.json, its
 # .plugin/plugin.json (only if that file has a "version") and its entry (matched by name) in the
 # root .claude-plugin/marketplace.json.
-# Usage: scripts/bump <duty-framework|duty-terraform> <N.N.N>
+# Usage: scripts/bump <duty-framework|duty-terraform|duty-ansible> <N.N.N>
 # DUTY_ROOT=<dir> works on another checkout instead of this one (the tests use a temp copy).
 # JSON is rewritten with jq (2-space indent), so inline {...} objects are expanded.
 set -euo pipefail
 
-usage() { echo "usage: ${0##*/} <duty-framework|duty-terraform> <N.N.N>" >&2; exit 2; }
+usage() { echo "usage: ${0##*/} <duty-framework|duty-terraform|duty-ansible> <N.N.N>" >&2; exit 2; }
 [ $# -eq 2 ] || usage
 plugin=$1 version=$2
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || usage
@@ -15,6 +15,7 @@ ROOT=${DUTY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 case $plugin in
   duty-framework) dir=$ROOT ;;
   duty-terraform) dir=$ROOT/plugins/duty-terraform ;;
+  duty-ansible) dir=$ROOT/plugins/duty-ansible ;;
   *) usage ;;
 esac
 command -v jq >/dev/null || { echo "${0##*/}: jq is required" >&2; exit 1; }

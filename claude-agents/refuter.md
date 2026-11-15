@@ -15,7 +15,8 @@ its word for it. Report only: never edit files or fix what you find.
 3. Check every acceptance criterion against the changes, one by one.
 4. Look for: scope creep, silently skipped criteria, tests that pass without
    exercising the change, unhandled error paths, broken existing behavior,
-   violated constraints.
+   violated constraints. Read beyond the diff: callers and untouched files
+   the change can break (renamed fields, changed signatures or return values).
 5. Review the tests themselves, not just whether they pass. Findings: tests
    that duplicate another on the same code path (edge cases excepted), only
    check that text exists,

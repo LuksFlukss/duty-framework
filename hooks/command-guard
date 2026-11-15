@@ -35,6 +35,8 @@ positionals() { # tool, args...
     gh) vf=' -R --repo ' ;;
     terragrunt) vf=' --terragrunt-working-dir --terragrunt-config --terragrunt-source --working-dir --config ' ;;
     pulumi) vf=' -C --cwd -s --stack ' ;;
+    # ansible-navigator: settings with a value (they can come before the subcommand: --mode stdout run)
+    ansible-navigator) vf=' -m --mode --ee --execution-environment --eei --execution-environment-image --ce --container-engine --lf --log-file --ll --log-level --la --log-append --pp --pull-policy --senv --set-environment-variable --penv --pass-environment-variable --eev --execution-environment-volume-mounts --co --container-options --pae --playbook-artifact-enable --pas --playbook-artifact-save-as --rac --rotate-artifacts-count --tz --time-zone --dc --display-color -i --inventory --ecmd --exec-command ' ;;
     az) vf=' -n --name -g --resource-group --subscription -l --location --query -o --output --ids ' ;;
     # aws: global options with a value, and the s3 transfer options whose value would pass for the last positional
     aws) vf=' --region --profile --output --query --endpoint-url --color --cli-read-timeout --cli-connect-timeout --ca-bundle --cli-binary-format --exclude --include --acl --storage-class --sse --sse-kms-key-id --cache-control --content-type --content-disposition --content-encoding --content-language --expires --metadata --metadata-directive --grants --source-region --page-size ' ;;
@@ -178,6 +180,39 @@ check() { # words...
         rollout) [ "$s" = restart ] && echo "apply kubectl rollout restart" ;;
       esac ;;
     helm) case $v in install|upgrade|uninstall|delete|rollback) echo "apply helm $v" ;; esac ;;
+    # ansible connects to real hosts and runs modules (--check too); syntax checks, listings, version and help don't.
+    # Only words before a lone -- count as its options (exec -- psql -h db: -h belongs to psql).
+    ansible|ansible-playbook|ansible-navigator|ansible-pull|ansible-console|ansible-runner)
+      local o=() a
+      for a in "${w[@]}"; do [ "$a" = -- ] && break; o+=("$a"); done
+      for a in --version -h --help; do has $a "${o[@]}" && return 0; done
+      case $t in
+        ansible) has --list-hosts "${o[@]}" || echo "apply ansible" ;;
+        ansible-playbook)
+          for a in --syntax-check --list-hosts --list-tasks --list-tags; do has $a "${o[@]}" && return 0; done
+          echo "apply ansible-playbook" ;;
+        ansible-navigator)
+          # only run (a playbook) and exec (any command in the execution environment) reach hosts. The subcommand is
+          # the first known one: an unlisted option with a value can't hide it (--unknown x run).
+          v=
+          for a in "${P[@]}"; do
+            case $a in builder|collections|config|doc|exec|images|inventory|lint|replay|run|settings|welcome) v=$a; break ;; esac
+          done
+          case $v in
+            run) for a in --syntax-check --list-hosts --list-tasks --list-tags; do has $a "${o[@]}" && return 0; done
+              echo "apply ansible-navigator run" ;;
+            exec) echo "apply ansible-navigator exec" ;;
+          esac ;;
+        # worker runs the playbook in the transmit | worker | process pipeline
+        ansible-runner) case $v in run|start|worker) echo "apply ansible-runner $v" ;; esac ;;
+        *) echo "apply $t" ;;
+      esac ;;
+    # Galaxy writes: collection/role publish, import, delete (also the old form without "role": ansible-galaxy delete)
+    ansible-galaxy)
+      case $v in
+        publish|import|delete) echo "apply ansible-galaxy $v" ;;
+        *) case $s in publish|import|delete) echo "apply ansible-galaxy $v $s" ;; esac ;;
+      esac ;;
   esac
   return 0
 }

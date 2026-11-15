@@ -1,0 +1,19 @@
+{
+  "name": "duty-ansible",
+  "description": "Optional add-on for duty-framework: Ansible skill, specialist agent and the Ansible development tools MCP server (best practices, Zen of Ansible) for playbooks, roles and collections",
+  "version": "0.1.1",
+  "author": {
+    "name": "Louka Vanhoucke"
+  },
+  "license": "MIT",
+  "agents": "./copilot-agents",
+  "mcpServers": {
+    "ansible": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "docker info >/dev/null 2>&1 || { echo \"duty-ansible needs Docker: start Docker, then restart the session.\" >&2; exit 1; }; exec docker run -i --rm -v \"$PWD:/workspace:ro\" -e WORKSPACE_ROOT=/workspace ghcr.io/ansible/devtools-mcp-server:26.6.0 --stdio"
+      ]
+    }
+  }
+}

@@ -16,6 +16,12 @@
       "description": "Optional Terraform add-on: skill, specialist agent and the Terraform MCP server for Azure and AWS",
       "version": "0.1.0",
       "source": "./plugins/duty-terraform"
+    },
+    {
+      "name": "duty-ansible",
+      "description": "Optional Ansible add-on: skill, specialist agent and the Ansible development tools MCP server for playbooks, roles and collections",
+      "version": "0.1.1",
+      "source": "./plugins/duty-ansible"
     }
   ]
 }

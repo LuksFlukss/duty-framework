@@ -45,11 +45,13 @@
 
 ## 4. Debug systematically
 - Reproduce first, then find the root cause (read the error, trace the data, check recent changes) before changing code. No guessed fixes.
+- Before editing a shared function, grep all its callers. If the root cause is in shared code, fix it there once, not in each caller.
 - One hypothesis at a time. If two fixes fail, stop and explain what you've learned.
 
 ## 5. Best solution, not overcomplicated
 - Build only what was asked: no speculative features, no "while I'm here" changes.
 - Pick the best solution for the circumstances (problem, repo, scale), not the most basic one: for new work the current standard tech for the job (frontend, backend, data, infra or tooling); in an existing repo, reuse its code, patterns and stack.
+- Before writing new code, check in order: is it needed at all, is it already in the repo, does the standard library, platform or an installed dependency do it well? Don't propose a new dependency to save a few lines. Code your change makes obsolete: remove it rather than work around it; if it lies outside the files you may change, report it instead.
 - No extra libraries, layers, abstractions or config until needed. Don't touch unrelated files or reformat code you didn't change.
 
 ## 6. Verify before claiming done

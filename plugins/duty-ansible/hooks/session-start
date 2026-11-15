@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Nudges toward the ansible skill when the working directory holds Ansible content. Silent otherwise.
+# Triggers (depth <= 6, vendored dirs pruned): ansible.cfg, galaxy.yml, collections/requirements.yml,
+# playbooks/*.yml, roles/*/tasks/main.yml|yaml, group_vars/ or host_vars/ files, or a standalone role repo
+# (tasks/main.yml|yaml and meta/main.yml|yaml at the top).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/hooks/emit.sh"
+
+found=
+if { [ -f tasks/main.yml ] || [ -f tasks/main.yaml ]; } && { [ -f meta/main.yml ] || [ -f meta/main.yaml ]; }; then found=role; fi
+[ -n "$found" ] || found=$(find . -maxdepth 6 \
+  \( -name .git -o -name .venv -o -name venv -o -name node_modules -o -path '*/collections/ansible_collections' \) -prune -o \
+  -type f \( -name ansible.cfg -o -name galaxy.yml -o -path '*/collections/requirements.yml' -o -path '*/playbooks/*.yml' \
+    -o -path '*/roles/*/tasks/main.yml' -o -path '*/roles/*/tasks/main.yaml' -o -path '*/group_vars/*' -o -path '*/host_vars/*' \) \
+  -print 2>/dev/null | head -1 || true)
+[ -n "$found" ] || exit 0
+
+emit SessionStart 'Ansible content detected: load the `ansible` skill (duty-ansible) before working on Ansible; delegate Ansible work to the ansible agent.'

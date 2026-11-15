@@ -126,16 +126,25 @@ check "marketplace lists duty-terraform at the add-on's manifest version" \
   ".plugins[1].name == \"duty-terraform\" and .plugins[1].source == \"./plugins/duty-terraform\" and (.plugins[1].version == \"$tf_version\") and (\"$tf_version\" != \"\")"
 out=$(cat "$ROOT/plugins/duty-terraform/.plugin/plugin.json" 2>/dev/null)
 check "duty-terraform copilot manifest version matches the claude manifest" ".version == \"$tf_version\" and (\"$tf_version\" != \"\")"
+out=$(cat "$ROOT/.claude-plugin/marketplace.json")
+an_version=$(jq -r .version "$ROOT/plugins/duty-ansible/.claude-plugin/plugin.json" 2>/dev/null)
+check "marketplace lists duty-ansible at the add-on's manifest version" \
+  ".plugins[2].name == \"duty-ansible\" and .plugins[2].source == \"./plugins/duty-ansible\" and (.plugins[2].version == \"$an_version\") and (\"$an_version\" != \"\")"
+out=$(cat "$ROOT/plugins/duty-ansible/.plugin/plugin.json" 2>/dev/null)
+check "duty-ansible copilot manifest version matches the claude manifest" ".version == \"$an_version\" and (\"$an_version\" != \"\")"
 out=$(cat "$ROOT/.plugin/plugin.json" 2>/dev/null)
 check "copilot manifest points at copilot-agents, same version" ".name == \"duty-framework\" and .agents == \"./copilot-agents\" and .version == \"$ver\" and (\"$ver\" != \"\")"
 
 # scripts/bump, only ever against a copy (DUTY_ROOT)
 BT=$(mktemp -d)
-mkdir -p "$BT/.claude-plugin" "$BT/.plugin" "$BT/plugins/duty-terraform/.claude-plugin" "$BT/plugins/duty-terraform/.plugin"
-for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json; do
+mkdir -p "$BT/.claude-plugin" "$BT/.plugin" "$BT/plugins/duty-terraform/.claude-plugin" "$BT/plugins/duty-terraform/.plugin" \
+  "$BT/plugins/duty-ansible/.claude-plugin" "$BT/plugins/duty-ansible/.plugin"
+for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json \
+  plugins/duty-ansible/.claude-plugin/plugin.json plugins/duty-ansible/.plugin/plugin.json; do
   cp "$ROOT/$f" "$BT/$f"
 done
-bsum() { (cd "$BT" && cat .claude-plugin/plugin.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json | cksum); }
+bsum() { (cd "$BT" && cat .claude-plugin/plugin.json .plugin/plugin.json plugins/duty-terraform/.claude-plugin/plugin.json plugins/duty-terraform/.plugin/plugin.json \
+  plugins/duty-ansible/.claude-plugin/plugin.json plugins/duty-ansible/.plugin/plugin.json | cksum); }
 jv() { jq -r "$2" "$BT/$1"; }
 before=$(bsum)
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
@@ -148,19 +157,30 @@ out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" duty-terraform 7.8.9 2>&1); rc=$?
   && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-terraform") | .version')" = 7.8.9 ]
 ok_or_fail "bump duty-terraform sets its manifests and marketplace entry" $?
 [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-framework") | .version')" = "$ver" ] \
-  && [ "$(jv .claude-plugin/plugin.json .version)" = "$ver" ] && [ "$(jv .plugin/plugin.json .version)" = "$ver" ]
-ok_or_fail "bump duty-terraform leaves duty-framework untouched" $?
+  && [ "$(jv .claude-plugin/plugin.json .version)" = "$ver" ] && [ "$(jv .plugin/plugin.json .version)" = "$ver" ] \
+  && [ "$(jv plugins/duty-ansible/.claude-plugin/plugin.json .version)" = "$an_version" ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-ansible") | .version')" = "$an_version" ]
+ok_or_fail "bump duty-terraform leaves duty-framework and duty-ansible untouched" $?
 printf '%s' "$out" | grep -q '7.8.9' && printf '%s' "$out" | grep -q "$tf_before"
 ok_or_fail "bump prints what it changed (old and new version)" $?
 [ "$(mode "$BT/.claude-plugin/marketplace.json")" = 640 ] && [ "$(mode "$BT/plugins/duty-terraform/.claude-plugin/plugin.json")" = 640 ] \
   && [ "$(mode "$BT/plugins/duty-terraform/.plugin/plugin.json")" = 664 ]
 ok_or_fail "bump keeps the manifests' file mode (not mktemp's 0600)" $?
+an_before=$(jv plugins/duty-ansible/.claude-plugin/plugin.json .version)
+out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" duty-ansible 4.5.6 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(jv plugins/duty-ansible/.claude-plugin/plugin.json .version)" = 4.5.6 ] \
+  && [ "$(jv plugins/duty-ansible/.plugin/plugin.json .version)" = 4.5.6 ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-ansible") | .version')" = 4.5.6 ] \
+  && [ "$(jv plugins/duty-terraform/.claude-plugin/plugin.json .version)" = 7.8.9 ] && [ "$(jv .claude-plugin/plugin.json .version)" = "$ver" ]
+ok_or_fail "bump duty-ansible sets its manifests and marketplace entry only (was $an_before)" $?
 out=$(DUTY_ROOT="$BT" "$ROOT/scripts/bump" duty-framework 3.2.1 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$(jv .claude-plugin/plugin.json .version)" = 3.2.1 ] && [ "$(jv .plugin/plugin.json .version)" = 3.2.1 ] \
   && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-framework") | .version')" = 3.2.1 ] \
   && [ "$(jv plugins/duty-terraform/.claude-plugin/plugin.json .version)" = 7.8.9 ] \
-  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-terraform") | .version')" = 7.8.9 ]
-ok_or_fail "bump duty-framework sets its three files, not the add-on" $?
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-terraform") | .version')" = 7.8.9 ] \
+  && [ "$(jv plugins/duty-ansible/.claude-plugin/plugin.json .version)" = 4.5.6 ] \
+  && [ "$(jv .claude-plugin/marketplace.json '.plugins[] | select(.name == "duty-ansible") | .version')" = 4.5.6 ]
+ok_or_fail "bump duty-framework sets its three files, not the add-ons" $?
 jq -e . "$BT/.claude-plugin/marketplace.json" "$BT/.claude-plugin/plugin.json" "$BT/.plugin/plugin.json" >/dev/null 2>&1
 ok_or_fail "bump leaves valid JSON" $?
 after=$(bsum)
@@ -732,6 +752,25 @@ passes 'tofu apply' DUTY_ALLOW_APPLY=1
 passes 'az group delete -n x' DUTY_ALLOW_APPLY=1
 passes 'aws s3 rm s3://b/k' DUTY_ALLOW_APPLY=1
 passes 'npm publish' DUTY_ALLOW_APPLY=1
+# ansible: runs against real hosts and Galaxy publishes ask (delete with the DESTRUCTIVE: marker); syntax checks,
+# listings, help and local tools pass
+for c in 'ansible-playbook site.yml' 'ansible-playbook -i inv site.yml --check --diff' 'ansible all -m ping' \
+  "ansible web -m ansible.builtin.shell -a 'x' -b" 'ansible-navigator run site.yml -m stdout' 'ansible-navigator exec -- ls' \
+  'ansible-pull -U url' 'sudo ansible-playbook x.yml' 'ansible-navigator --mode stdout run site.yml' \
+  'ansible-navigator --log-file doc run site.yml' 'ansible-navigator exec -- psql -h db' 'ansible-console all' \
+  'ansible-runner run . -p site.yml' 'ansible-galaxy collection publish ns-c-1.0.0.tar.gz' 'ansible-galaxy role import user repo' \
+  'ansible-runner start . -p site.yml' 'ansible-runner worker --private-data-dir d'; do
+  asks_marked no "$c"
+done
+asks_marked yes 'ansible-galaxy role delete user repo'
+for c in 'ansible-playbook --syntax-check site.yml' 'ansible-playbook site.yml --list-tasks' 'ansible all --list-hosts' \
+  'ansible --version' 'ansible-playbook -h' 'ansible-lint --fix' 'ansible-doc ansible.builtin.copy' \
+  'ansible-galaxy collection install -r requirements.yml' 'ansible-navigator doc ansible.builtin.copy' \
+  'ansible-navigator run site.yml --syntax-check' 'ansible-inventory --graph' \
+  'ansible-navigator --mode stdout doc ansible.builtin.copy' 'ansible-runner --version'; do
+  passes "$c"
+done
+passes 'ansible-playbook site.yml' DUTY_ALLOW_APPLY=1
 asks 'pulumi up' DUTY_ALLOW_GIT_WRITE=1
 denies git 'gh pr create --fill'
 denies git 'git commit -m x' DUTY_ALLOW_APPLY=1
@@ -958,6 +997,11 @@ if out=$("$ROOT/plugins/duty-terraform/tests/test-terraform.sh" 2>&1); then
   echo "ok   duty-terraform tests"
 else
   echo "FAIL duty-terraform tests"; printf '%s\n' "$out" | grep -v '^ok'; fails=$((fails + 1))
+fi
+if out=$("$ROOT/plugins/duty-ansible/tests/test-ansible.sh" 2>&1); then
+  echo "ok   duty-ansible tests"
+else
+  echo "FAIL duty-ansible tests"; printf '%s\n' "$out" | grep -v '^ok'; fails=$((fails + 1))
 fi
 
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

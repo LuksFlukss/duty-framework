@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "duty-ansible",
+  "description": "Optional add-on for duty-framework: Ansible skill, specialist agent and the Ansible development tools MCP server (best practices, Zen of Ansible) for playbooks, roles and collections"
+}

@@ -5,7 +5,7 @@ My working rules ([RULES.md](RULES.md)) loaded into every session of Claude Code
 - **Session start** injects `RULES.md` and the skill list (also after `/clear` and compaction).
 - **Subagents** (Claude Code) get the parts of `RULES.md` that apply to them (git, real environments, test first, debug, best solution, verify), with a note to report questions back instead of asking the user.
 - **Every prompt** gets a one-line reminder: size the task, no git writes, verify before "done".
-- **Command guard** (Claude Code): a `PreToolUse` hook checks every Bash command before it runs, in the main session and in subagents. Git writes (`commit`, `push`, `reset`, ...) are blocked. Apply/deploy commands (`terraform`/`tofu`/`terragrunt apply`, `kubectl apply`, `helm upgrade`, `pulumi up`, `npm publish`, `docker push`, `gh release create`, write commands of `az` and `aws` including `az rest` with a write `--method`, and `az vm run-command invoke`, which runs code on a real machine) get a permission prompt: they run only if you approve, that one time. Deletes (`destroy`, `delete`, `purge`, `uninstall`, `terminate-*`, S3 removes, ...) get a prompt starting with `DESTRUCTIVE:`. A git write in the same command line still blocks the whole line. A safety net, not a security boundary: `bash -c` or scripts get past it. To skip them for a session, start Claude Code with `DUTY_ALLOW_GIT_WRITE=1` (git writes) and/or `DUTY_ALLOW_APPLY=1` (no prompts).
+- **Command guard** (Claude Code): a `PreToolUse` hook checks every Bash command before it runs, in the main session and in subagents. Git writes (`commit`, `push`, `reset`, ...) are blocked. Apply/deploy commands (`terraform`/`tofu`/`terragrunt apply`, `kubectl apply`, `helm upgrade`, `pulumi up`, `npm publish`, `docker push`, `gh release create`, write commands of `az` and `aws` including `az rest` with a write `--method`, and `az vm run-command invoke`, which runs code on a real machine, and Ansible runs against hosts: `ansible-playbook`, ad-hoc `ansible`, `ansible-navigator run`/`exec`, `ansible-pull`, `ansible-console`, `ansible-runner run`/`start`/`worker`, not with `--syntax-check` or `--list-*`; `ansible-galaxy` publish/import/delete) get a permission prompt: they run only if you approve, that one time. Deletes (`destroy`, `delete`, `purge`, `uninstall`, `terminate-*`, S3 removes, ...) get a prompt starting with `DESTRUCTIVE:`. A git write in the same command line still blocks the whole line. A safety net, not a security boundary: `bash -c` or scripts get past it. To skip them for a session, start Claude Code with `DUTY_ALLOW_GIT_WRITE=1` (git writes) and/or `DUTY_ALLOW_APPLY=1` (no prompts).
 - **Stop gate:** a `Stop` hook blocks handing off a medium or large task that has edits but no refuter review (large: also no `team` skill). It reads the `Size:` label from the transcript. `DUTY_DEBUG=1` makes it log each decision to `${CLAUDE_PLUGIN_DATA}/stop-gate.log` (fallback `$TMPDIR/duty-framework/`).
 - **Edit tracking** (Claude Code, git repos only, not Copilot): a `PreToolUse`/`PostToolUse` hook on Bash (`hooks/edit-track`) records the Bash calls that changed file contents in the git working tree, so the stop gate counts `sed -i` or `cat > file` edits too, not just `Edit`/`Write`. Commits, `git add` and rewrites with identical content don't count.
 - **Skills:** `design`, `plan`, `tdd`, `debugging`, `verify-and-handoff`, `team` (orchestrate the role agents on large tasks), `agents` (personalise their model and effort), `explain` (walk through a repo's flow), `prior-art` (search for an existing tool before building, ask whether to use, adapt or build our own).
@@ -142,10 +142,40 @@ agy plugin install ~/duty-framework/plugins/duty-terraform
 
 What it may run: reading files, `terraform fmt`, `terraform init -backend=false`, `terraform validate`, `tflint`, `git ls-remote`. It never runs `terraform plan`, a normal `init`, `init -upgrade`, apply, destroy, import, state commands, taint or workspace changes; when a plan is needed it gives you the commands and reviews the saved plan file once you say it ran. Lock-file conflicts are handed back to you: remove `.terraform/` and `.terraform.lock.hcl` yourself, then tell it to continue. Its tests: `plugins/duty-terraform/tests/test-terraform.sh` (also run by `tests/test-hooks.sh`).
 
+## Optional: Ansible add-on
+
+`duty-ansible` (in `plugins/duty-ansible/`) sits on top of the core plugin for Ansible playbooks, roles and collections. It adds:
+
+- an `ansible` skill (write/change content following current guidelines, review a playbook, role or PR, upgrade ansible-core and collections) that loads only when you work with Ansible files (roles, playbooks, `group_vars`/`host_vars`, `ansible.cfg`, `galaxy.yml`, molecule; Antigravity: a glob rule; Copilot: a hook nudge)
+- an `ansible` specialist agent
+- Red Hat's [Ansible development tools MCP server](https://docs.ansible.com/projects/vscode-ansible/mcp/) (`ghcr.io/ansible/devtools-mcp-server`, pinned to `26.6.0`: from `26.8.0` its `ansible_content_best_practices` tool fails with `Could not resolve resource path for "agents.md"`), with your project mounted read-only. The skill uses only its guideline tools (`zen_of_ansible`, `ansible_content_best_practices`, `list_available_tools`), never its execution tools (`ansible_navigator`, environment setup, project creation, lint `fix`). Module docs come from your local `ansible-doc`, linting from your local `ansible-lint` (`production` profile).
+
+Requires Docker running, like the Terraform add-on: without it the MCP server fails with `duty-ansible needs Docker: start Docker, then restart the session.` There is no web or memory fallback.
+
+Claude Code:
+
+```bash
+claude plugin install duty-ansible@duty-framework
+```
+
+GitHub Copilot CLI:
+
+```bash
+copilot plugin install duty-ansible@duty-framework
+```
+
+Antigravity CLI:
+
+```bash
+agy plugin install ~/duty-framework/plugins/duty-ansible
+```
+
+What it may run: reading files, `ansible-lint`, `ansible-doc`, `ansible-playbook --syntax-check` / `--list-*`, `ansible-inventory` on local inventory files, `ansible-galaxy` installs into a project-local path. It never runs `ansible-playbook` against hosts (not even `--check`), ad-hoc `ansible`, `ansible-navigator run`/`exec`, `ansible-pull`, `ansible-console`, `ansible-runner run`/`start`/`worker`, `ansible-galaxy` publish/import/delete or `ansible-vault` decrypt/view/edit/rekey; when a run is needed it gives you the commands and reviews the output once you say it ran. Its tests: `plugins/duty-ansible/tests/test-ansible.sh` (also run by `tests/test-hooks.sh`).
+
 ## Develop
 
 - Role instructions live in `roles/<role>.md`. Don't edit `agents/`, `claude-agents/` or `copilot-agents/` by hand: run `scripts/build-agents` to regenerate them (the per-CLI frontmatter is in that script). The tests fail if they're out of date.
-- When releasing, run `scripts/bump <duty-framework|duty-terraform> <N.N.N>`: it sets `version` in that plugin's manifests and its `.claude-plugin/marketplace.json` entry. The tests check they all match.
+- When releasing, run `scripts/bump <duty-framework|duty-terraform|duty-ansible> <N.N.N>`: it sets `version` in that plugin's manifests and its `.claude-plugin/marketplace.json` entry. The tests check they all match.
 
 ## Test
 
