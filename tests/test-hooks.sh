@@ -13,9 +13,10 @@ check() { # name, jq expression that must be true
   fi
 }
 
+RUN_HOME=$(mktemp -d)
 run() { # hook, env...
   local hook="$1"; shift
-  out=$(env -u CLAUDE_PLUGIN_ROOT -u COPILOT_CLI "$@" "$ROOT/hooks/$hook" </dev/null 2>&1)
+  out=$(env -u CLAUDE_PLUGIN_ROOT -u COPILOT_CLI -u COPILOT_HOME -u XDG_CONFIG_HOME HOME="$RUN_HOME" "$@" "$ROOT/hooks/$hook" </dev/null 2>&1)
 }
 
 for hook in session-start prompt-nudge; do
@@ -69,6 +70,8 @@ done
 ok_or_fail() { # name, condition exit status
   if [ "$2" -eq 0 ]; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi
 }
+[ -s "$RUN_HOME/.copilot/settings.json" ]
+ok_or_fail "run() isolates HOME so session-start writes to RUN_HOME, not caller HOME" $?
 fm()   { sed -n '2,/^---$/p' "$1" 2>/dev/null | sed '$d'; }  # frontmatter of a file
 body() { awk 'n >= 2; /^---$/ { n++ }' "$1" 2>/dev/null; }  # text after frontmatter
 field() { fm "$1" | sed -n "s/^$2: *//p"; }
@@ -94,7 +97,7 @@ for role in scout researcher builder refuter debugger; do
   bad=0; [ -n "$tools" ] || bad=1
   for t in $tools; do printf ' %s ' "$AGY_TOOLS" | grep -q " $t " || bad=1; done
   ok_or_fail "agents/$role (agy) lists only known agy tools" $bad
-  # Copilot: no model (session default)
+  # Copilot: frontmatter has tools and no model (model/effort live in ~/.copilot/settings.json)
   [ -z "$(field "$ROOT/copilot-agents/$role.md" model)" ] && [ -n "$(field "$ROOT/copilot-agents/$role.md" tools)" ]
   ok_or_fail "copilot-agents/$role has tools and no model" $?
 done
@@ -239,10 +242,16 @@ out=$(cat "$CFG" 2>/dev/null); check "personalize saves choices in ~/.config/dut
   '.claude.scout == {"model":"claude-sonnet-5","effort":"high"} and .copilot.scout == {"model":"gpt-5.4","effort":"low"} and .agy.scout == {"model":"flash"}'
 P show claude | grep -E '^scout +claude-sonnet-5 +high' >/dev/null && P show claude | grep -E '^researcher +default' >/dev/null
 ok_or_fail "personalize show claude" $?
+P show copilot | grep -E '^scout +gpt-5.4 +low' >/dev/null \
+  && P show copilot | grep -E '^researcher +claude-sonnet-5.5 +high' >/dev/null \
+  && P show copilot | grep -E '^builder +gemini-4-argon +high' >/dev/null \
+  && P show copilot | grep -E '^refuter +claude-opus-5.5 +high' >/dev/null \
+  && P show copilot | grep -E '^debugger +gpt-6.1-sol +default' >/dev/null
+ok_or_fail "personalize show copilot includes repo defaults for unset roles" $?
 
 bad=0
-for args in "agy scout flash high" "agy scout claude-sonnet-5" "copilot scout nope" "claude scout claude-haiku-4-5 high" "claude nobody sonnet" "vim scout sonnet"; do
-  P set $args >/dev/null 2>&1 && { echo "     accepted: set $args"; bad=1; }
+for args in "set agy scout flash high" "set agy scout claude-sonnet-5" "set copilot scout nope" "set claude scout claude-haiku-4-5 high" "set claude nobody sonnet" "set vim scout sonnet" "apply vim" "apply copilot nobody" "apply copilot scout extra"; do
+  P $args >/dev/null 2>&1 && { echo "     accepted: $args"; bad=1; }
 done
 ok_or_fail "personalize rejects invalid tool, role, model or effort" $bad
 
@@ -266,12 +275,29 @@ ok_or_fail "personalize apply refreshes personal copies" $?
 P set claude scout default >/dev/null 2>&1 && P set agy scout default >/dev/null 2>&1 && P set copilot scout default >/dev/null 2>&1
 [ ! -e "$CA" ] && [ ! -e "$GA" ]
 ok_or_fail "personalize default removes claude/agy copies" $?
-out=$(cat "$CS"); check "personalize default removes copilot override, keeps the rest" \
-  '.theme == "dark" and .subagents.agents["other:agent"].model == "gpt-5.4" and (.subagents.agents | has("duty-framework:scout") | not)'
+out=$(cat "$CS"); check "personalize default restores copilot repo default, keeps the rest" \
+  '.theme == "dark" and .subagents.agents["other:agent"].model == "gpt-5.4" and .subagents.agents["duty-framework:scout"] == {"model":"claude-haiku-5.5","effortLevel":"medium"}'
 out=$(cat "$CFG" 2>/dev/null); check "personalize default clears saved choices" '[.claude.scout, .copilot.scout, .agy.scout] == [null, null, null]'
-echo '{"theme":"dark"}' > "$CS"; P set copilot scout gpt-5.4 >/dev/null 2>&1; P set copilot scout default >/dev/null 2>&1
-out=$(cat "$CS"); check "personalize default leaves no empty subagents block" '. == {"theme":"dark"}'
-rm -rf "$T"
+echo '{"theme":"dark"}' > "$CS"; P apply >/dev/null 2>&1
+out=$(cat "$CS"); check "personalize apply writes copilot repo defaults for all roles" \
+  '.theme == "dark" and .subagents.agents["duty-framework:scout"] == {"model":"claude-haiku-5.5","effortLevel":"medium"} and .subagents.agents["duty-framework:researcher"] == {"model":"claude-sonnet-5.5","effortLevel":"high"} and .subagents.agents["duty-framework:builder"] == {"model":"gemini-4-argon","effortLevel":"high"} and .subagents.agents["duty-framework:refuter"] == {"model":"claude-opus-5.5","effortLevel":"high"} and .subagents.agents["duty-framework:debugger"] == {"model":"gpt-6.1-sol"}'
+rm -f "$H/.copilot/settings.json"
+env -u CLAUDE_PLUGIN_ROOT -u XDG_CONFIG_HOME -u COPILOT_HOME HOME="$H" COPILOT_CLI=1 "$ROOT/hooks/session-start" </dev/null >/dev/null 2>&1
+out=$(cat "$CS"); check "session-start under Copilot creates settings.json with all role defaults when missing" \
+  '.subagents.agents["duty-framework:scout"] == {"model":"claude-haiku-5.5","effortLevel":"medium"} and .subagents.agents["duty-framework:researcher"] == {"model":"claude-sonnet-5.5","effortLevel":"high"} and .subagents.agents["duty-framework:builder"] == {"model":"gemini-4-argon","effortLevel":"high"} and .subagents.agents["duty-framework:refuter"] == {"model":"claude-opus-5.5","effortLevel":"high"} and .subagents.agents["duty-framework:debugger"] == {"model":"gpt-6.1-sol"}'
+echo '{"theme":"dark","subagents":{"agents":{"duty-framework:scout":{"model":"gpt-5.4","effortLevel":"low"}}}}' > "$CS"
+env -u CLAUDE_PLUGIN_ROOT -u XDG_CONFIG_HOME -u COPILOT_HOME HOME="$H" COPILOT_CLI=1 "$ROOT/hooks/session-start" </dev/null >/dev/null 2>&1
+out=$(cat "$CS"); check "session-start under Copilot seeds missing role defaults without overwriting existing choice" \
+  '.subagents.agents["duty-framework:scout"] == {"model":"gpt-5.4","effortLevel":"low"} and .subagents.agents["duty-framework:refuter"] == {"model":"claude-opus-5.5","effortLevel":"high"} and .subagents.agents["duty-framework:debugger"] == {"model":"gpt-6.1-sol"}'
+echo '{invalid' > "$CS"
+env -u CLAUDE_PLUGIN_ROOT -u XDG_CONFIG_HOME -u COPILOT_HOME HOME="$H" COPILOT_CLI=1 "$ROOT/hooks/session-start" </dev/null >/dev/null 2>&1
+[ -z "$(find "$H/.copilot" -name 'settings.json.*' 2>/dev/null)" ]
+ok_or_fail "session-start leaves no temp files when settings.json is malformed" $?
+rm -f "$CS" "$CFG" "$CA" "$GA"
+P apply >/dev/null 2>&1
+[ ! -e "$CS" ] && P apply copilot >/dev/null 2>&1 && [ -s "$CS" ]
+ok_or_fail "personalize apply with no args does not create ~/.copilot/settings.json; apply copilot does" $?
+rm -rf "$T" "$RUN_HOME"
 
 has() { grep -qF -- "$2" "$ROOT/$1"; }
 TMPDIR_EXPLAIN=$(mktemp -d)

@@ -27,7 +27,8 @@ and let the user switch (`/model`) or carry on; you can't switch it yourself.
 | `refuter` | no | Re-checks the work against the spec and re-runs verification itself |
 | `debugger` | no | Root cause only, when a failure survives a fix round |
 
-Every role runs on the session's default model unless the user personalised it
+Every role runs on its default model (built-in role defaults on Copilot, or the
+session's model on Claude Code and agy) unless the user personalised it
 with the `agents` skill. They're `duty-framework:<role>` subagents in Claude
 Code and Copilot, `<role>` in agy. If a personal `duty-<role>` agent exists
 (Claude Code, agy), use it instead: same role, the user's model. On a tool

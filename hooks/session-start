@@ -7,6 +7,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 skills=""
 # Claude Code already lists every plugin skill with its description; elsewhere list them here.
 if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ] || [ -n "${COPILOT_CLI:-}" ]; then
+  if [ -n "${COPILOT_CLI:-}" ]; then
+    cs="${COPILOT_HOME:-$HOME/.copilot}/settings.json"
+    for r in scout researcher builder refuter debugger; do
+      if [ ! -s "$cs" ] || ! jq -e --arg k "duty-framework:$r" '.subagents.agents[$k]' "$cs" >/dev/null 2>&1; then
+        "$ROOT/scripts/personalize" apply copilot "$r" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
   skills=$'\n## Skills (duty-framework)\nLoad the matching skill when a step applies:\n'
   for f in "$ROOT"/skills/*/SKILL.md; do
     [ -f "$f" ] || continue

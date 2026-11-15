@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Generates the per-platform agent files from roles/*.md (name, description, instructions).
 # Each platform wants different frontmatter, so only the lines below differ.
-# Every role uses the session's default model; scripts/personalize sets per-user choices.
+# Claude/Antigravity roles use the session's default model; Copilot defaults are seeded by session-start/personalize.
 #   agents/          Antigravity (only reads agents/; model is a tier, native tool names)
 #   claude-agents/   Claude Code (model: inherit = session default, Claude tool names)
-#   copilot-agents/  Copilot CLI (no model = session default, Copilot tool names)
+#   copilot-agents/  Copilot CLI (model/effort in ~/.copilot/settings.json, Copilot tool names)
 # Usage: scripts/build-agents [output-root]   (default: repo root)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

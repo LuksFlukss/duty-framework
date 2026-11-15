@@ -5,9 +5,13 @@ description: Use when the user wants to personalise the role agents (scout, rese
 
 # Agents: personalise model and effort per role
 
-By default every role runs on the session's default model. This skill saves the
-user's own choice per role and tool in `~/.config/duty-framework/agents.json`
-and applies it. All reading and writing goes through the script; never edit the
+By default, Claude Code and Antigravity roles run on the session's default model,
+while Copilot roles come with built-in defaults (`scout`: `claude-haiku-5.5`
+`medium`, `researcher`: `claude-sonnet-5.5` `high`, `builder`: `gemini-4-argon`
+`high`, `refuter`: `claude-opus-5.5` `high`, `debugger`: `gpt-6.1-sol`).
+This skill saves the user's own choice per role and tool in
+`~/.config/duty-framework/agents.json` and applies it (or resets to the default
+with `default`). All reading and writing goes through the script; never edit the
 config files by hand.
 
 Script: `scripts/personalize` in this plugin (two levels up from this skill's
@@ -21,7 +25,8 @@ directory). Below it's written as `personalize`.
 3. **Roles.** Ask which roles to change. Untouched roles keep their setting.
 4. **Per role, one question at a time:**
    - Model: run `personalize models <tool>` and offer those, plus `default`
-     (the session's model). If the question UI only fits a few options, list
+     (the built-in Copilot role default, or the session's model on Claude/agy).
+     If the question UI only fits a few options, list
      every model in chat, offer 3 sensible picks plus `default`, and let the user
      type another.
    - Effort: run `personalize efforts <tool> <model>`. Empty output means that

@@ -10,7 +10,7 @@
 #                                             copilot: checked with Copilot on first use, remembered)
 #   personalize show <tool>                   current choice per role
 #   personalize set <tool> <role> <model|default> [effort|default]
-#   personalize apply                         rewrite every saved choice (after a plugin update)
+#   personalize apply [<tool> [<role>]]       rewrite saved/default choices (after a plugin update)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}/duty-framework/agents.json"
@@ -24,7 +24,7 @@ json_edit() { # file, jq args... (creates the file, writes atomically)
   local f="$1"; shift
   mkdir -p "$(dirname "$f")"; [ -s "$f" ] || echo '{}' > "$f"
   local tmp; tmp="$(mktemp "$f.XXXXXX")"
-  jq "$@" "$f" > "$tmp" && mv "$tmp" "$f"
+  if jq "$@" "$f" > "$tmp"; then mv "$tmp" "$f"; else rm -f "$tmp"; return 1; fi
 }
 
 models() {
@@ -80,7 +80,21 @@ efforts() { # tool, model
   esac
 }
 
-saved() { [ -s "$CFG" ] && jq -c --arg t "$1" --arg r "$2" '.[$t][$r] // empty' "$CFG" || true; }
+repo_default() { # tool, role -> json object or empty
+  case "$1:$2" in
+    copilot:scout)      echo '{"model":"claude-haiku-5.5","effort":"medium"}' ;;
+    copilot:researcher) echo '{"model":"claude-sonnet-5.5","effort":"high"}' ;;
+    copilot:builder)    echo '{"model":"gemini-4-argon","effort":"high"}' ;;
+    copilot:refuter)    echo '{"model":"claude-opus-5.5","effort":"high"}' ;;
+    copilot:debugger)   echo '{"model":"gpt-6.1-sol"}' ;;
+  esac
+}
+
+saved() {
+  local s=""
+  [ -s "$CFG" ] && s="$(jq -c --arg t "$1" --arg r "$2" '.[$t][$r] // empty' "$CFG" || true)"
+  [ -n "$s" ] && echo "$s" || repo_default "$1" "$2"
+}
 
 personal_copy() { # source agent file, role, model, effort -> stdout
   awk -v name="duty-$2" -v model="$3" -v effort="$4" '
@@ -98,14 +112,8 @@ apply_one() { # tool, role
   fi
   case "$1" in
     copilot)
-      if [ -n "$model" ]; then
-        json_edit "$COPILOT_SETTINGS" --arg k "duty-framework:$2" --arg m "$model" --arg e "$effort" \
-          '.subagents.agents[$k] = ({model: $m} + (if $e == "" then {} else {effortLevel: $e} end))'
-      elif [ -f "$COPILOT_SETTINGS" ]; then
-        json_edit "$COPILOT_SETTINGS" --arg k "duty-framework:$2" 'del(.subagents.agents[$k])
-          | if .subagents.agents == {} then del(.subagents.agents) else . end
-          | if .subagents == {} then del(.subagents) else . end'
-      fi ;;
+      json_edit "$COPILOT_SETTINGS" --arg k "duty-framework:$2" --arg m "$model" --arg e "$effort" \
+        '.subagents.agents[$k] = ({model: $m} + (if $e == "" then {} else {effortLevel: $e} end))' ;;
     claude|agy)
       local src dest
       if [ "$1" = claude ]; then src="$ROOT/claude-agents/$2.md" dest="$HOME/.claude/agents/duty-$2.md"
@@ -149,7 +157,14 @@ case "$cmd" in
     apply_one "$tool" "$role"
     echo "$tool $role: $model${4:+ ($effort)}" ;;
   apply)
-    for t in $TOOLS; do for r in $ROLES; do [ -n "$(saved "$t" "$r")" ] && apply_one "$t" "$r"; done; done
-    echo "applied saved choices from $CFG" ;;
+    [ $# -le 2 ] || die "usage: apply [<tool> [<role>]]"
+    tools="${1:-$TOOLS}"; roles="${2:-$ROLES}"
+    [ -z "${1:-}" ] || in_list "$1" "$(printf '%s\n' $TOOLS)" || die "unknown tool '$1' (claude, copilot, agy)"
+    [ -z "${2:-}" ] || in_list "$2" "$(printf '%s\n' $ROLES)" || die "unknown role '$2' ($ROLES)"
+    for t in $tools; do
+      [ "$t" = copilot ] && [ -z "${1:-}" ] && [ ! -f "$COPILOT_SETTINGS" ] && continue
+      for r in $roles; do apply_one "$t" "$r"; done
+    done
+    echo "applied choices from $CFG" ;;
   *) sed -n '2,/^[^#]/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 1 ;;
 esac

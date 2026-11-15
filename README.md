@@ -70,7 +70,7 @@ Personalised agents: run `scripts/personalize apply` after any update so your pe
 
 ## Agents
 
-Five role agents, used by the `team` skill: `scout` (finds code), `researcher` (checks facts), `builder` (implements test-first), `refuter` (re-checks the work), `debugger` (root cause only). By default every role runs on the session's default model.
+Five role agents, used by the `team` skill: `scout` (finds code), `researcher` (checks facts), `builder` (implements test-first), `refuter` (re-checks the work), `debugger` (root cause only). On Claude Code and Antigravity every role defaults to the session's model; on Copilot CLI, `session-start` and `scripts/personalize` seed built-in defaults (`scout`: `claude-haiku-5.5` `medium`, `researcher`: `claude-sonnet-5.5` `high`, `builder`: `gemini-4-argon` `high`, `refuter`: `claude-opus-5.5` `high`, `debugger`: `gpt-6.1-sol`), which you can override per role with `scripts/personalize` (or reset back with `default`).
 
 To keep token use down, keep the session on a mid-tier model and switch to the strongest one (Fable in Claude Code) only for large tasks; the `team` skill reminds you when a large task starts on a weaker model. Give the roles cheaper models with the `agents` skill below, e.g. `scout` haiku, `researcher` and `builder` sonnet, `refuter` opus, `debugger` fable.
 
